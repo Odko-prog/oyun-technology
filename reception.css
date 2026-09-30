@@ -15,3 +15,18 @@ body:before{background:linear-gradient(90deg,#081030b5 0%,#10204140 42%,transpar
 #view-oyun .feature-list{gap:6px;margin:5px 0}#view-oyun .feature-list span{padding:8px}#view-oyun .chat{padding:9px;margin-top:4px}#view-oyun .bubble{padding:8px;margin-top:6px}#view-oyun .view-note{font-size:9px;margin-top:6px}
 .request-form{margin-top:18px}.request-form h3{font-size:19px;color:#fff;margin:0 0 14px}.request-fields{display:grid;grid-template-columns:1fr 1fr;gap:12px}.request-form label{display:block;color:#dae7ff;font-size:12px;margin-bottom:12px}.request-form input,.request-form textarea{display:block;width:100%;box-sizing:border-box;margin-top:6px;padding:11px 12px;border:1px solid #bdd7ff55;border-radius:10px;background:#14244888;color:#fff;font:inherit;font-size:14px}.request-form input:focus,.request-form textarea:focus{outline:2px solid #afcaff;outline-offset:2px}.request-form textarea{resize:vertical;min-height:85px}.request-form .request-note,.request-form .request-status{font-size:12px;line-height:1.5}.request-form .reception-primary{font-size:14px;padding:12px 18px}.request-status{min-height:18px}@media(max-width:500px){.request-fields{grid-template-columns:1fr}}
 .company-email{display:inline-block;color:#e3edff;margin-bottom:8px;font-size:14px;text-underline-offset:4px}
+/* Keep longer panel content reachable at every viewport height. */
+.control-panel .panel-top,.control-panel .tabs{flex-shrink:0}
+.control-panel .panel-content{overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin;scrollbar-color:#9bb7e5 #18294b;scrollbar-gutter:stable}
+.control-panel .view{height:auto;min-height:100%;flex-shrink:0}
+#view-contact .contact-number{font-size:23px!important;letter-spacing:1px;padding:11px 14px;margin:6px 0;flex-shrink:0}
+#view-contact .contact-number small{margin-top:5px}
+#view-contact>p{margin:7px 0;font-size:12px}
+#view-contact .view-heading{margin-bottom:6px}
+#view-contact .request-form{margin-top:12px}
+#view-contact .request-form h3{font-size:17px;margin-bottom:10px}
+#view-contact .request-form label{margin-bottom:9px}
+#view-contact .request-form input{padding:9px 11px}
+#view-contact .request-form textarea{min-height:68px}
+#view-contact .request-form .request-note{margin:6px 0 10px}
+@media(max-width:500px){#view-contact .request-fields{grid-template-columns:1fr 1fr;gap:9px}}
