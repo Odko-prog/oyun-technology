@@ -10,7 +10,10 @@ requestArea.className='request-form';
 requestArea.innerHTML=`<h3>Хүсэлт илгээх</h3><div class="request-fields"><label>Таны нэр<input name="customer" autocomplete="name" required maxlength="100"></label><label>Утас эсвэл имэйл<input name="contact" required maxlength="150" autocomplete="email"></label></div><label>Ямар ажилд туслах хэрэгтэй вэ?<textarea name="request" required maxlength="2000" rows="3" placeholder="Жишээ: борлуулалтын тайлангаа автоматжуулах"></textarea></label><p class="request-note">Хүсэлтийг FormSubmit үйлчилгээгээр компанийн имэйлд дамжуулна.</p><button type="submit" class="reception-primary">Хүсэлт илгээх</button><p class="request-status" role="status"></p>`;
 command.querySelector('#view-contact .contact-prompt').replaceWith(requestArea);
 
-requestArea.action='https://formsubmit.co/oyuntechnology2@gmail.com';
-requestArea.method='POST';
+
+
 const requestSubject=document.createElement('input');requestSubject.type='hidden';requestSubject.name='_subject';requestSubject.value='Oyun Technology — шинэ хүсэлт';requestArea.append(requestSubject);
 const emailLink=document.createElement('a');emailLink.className='company-email';emailLink.href='mailto:oyuntechnology2@gmail.com';emailLink.textContent='oyuntechnology2@gmail.com ↗';command.querySelector('#view-contact .view-heading').after(emailLink);
+requestArea.removeAttribute('action');requestArea.removeAttribute('method');requestArea.querySelector('button[type="submit"]').textContent='Имэйлээр илгээх';requestArea.querySelector('.request-note').textContent='Таны имэйл программд хүсэлт нээгдэнэ. Тэндээс Илгээх дарж явуулна.';
+requestArea.addEventListener('submit',event=>{event.preventDefault();const values=new FormData(requestArea);const body=`Нэр: ${values.get('customer')}\nХолбоо барих: ${values.get('contact')}\nХэрэгцээ: ${values.get('request')}`;location.href=`mailto:oyuntechnology2@gmail.com?subject=${encodeURIComponent('Oyun Technology — хүсэлт')}&body=${encodeURIComponent(body)}`;requestArea.querySelector('.request-status').textContent='Имэйл программ нээгдээгүй бол дээрх хаяг руу шууд бичээрэй.'});
+
