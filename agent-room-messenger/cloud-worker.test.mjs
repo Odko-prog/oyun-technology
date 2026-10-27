@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {validateReply,childEnvironment,processRequest,startCloudWorker} from './cloud-worker.mjs';
+import {validateReply,childEnvironment,processRequest,startCloudWorker,executorConfig} from './cloud-worker.mjs';
 import {createHash} from 'node:crypto';
 test('rejects empty, oversized and unexpected reply states',()=>{
  for(const v of [{reply:'',status:'review'},{reply:'x'.repeat(1801),status:'review'},{reply:'done',status:'unknown'},null])assert.throws(()=>validateReply(v));
@@ -55,4 +55,10 @@ test('tampered file cannot be sent as completed work',async()=>{
  let sends=0;
  const result=await processRequest({query:async()=>({rows:[]})},async()=>{sends++;return {sent:true};},job,async()=>({reply:'done',status:'completed',artifacts:[{name:'result.txt',mime:'text/plain',bytes:Buffer.from('changed'),sha256:'0'.repeat(64)}]}));
  assert.equal(sends,0);assert.equal(result.review,true);
+});
+test('executor uses actual automatic review and scoped output directory',()=>{
+ const c=executorConfig('/tmp/agent-room-fixture');
+ assert.ok(c.includes('approval_policy="on-request"'));assert.ok(c.includes('approvals_reviewer="auto_review"'));
+ assert.ok(c.some(x=>x.includes('agent-room-fixture')&&x.includes('outputs')));
+ assert.ok(!c.some(x=>/danger-full-access|bypass|approval_policy="never"/.test(x)));
 });
