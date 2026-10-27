@@ -1,6 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {validateReply,childEnvironment,processRequest,startCloudWorker} from './cloud-worker.mjs';
+import {createHash} from 'node:crypto';
 test('rejects empty, oversized and unexpected reply states',()=>{
  for(const v of [{reply:'',status:'review'},{reply:'x'.repeat(1801),status:'review'},{reply:'done',status:'unknown'},null])assert.throws(()=>validateReply(v));
  assert.equal(validateReply({reply:'Туршилт',status:'awaiting_customer'}).reply,'Туршилт');
@@ -36,4 +37,22 @@ test('completed text work is delivered once and retains completion status',async
  const calls=[];const pool={query:async()=>({rows:[]})};
  const result=await processRequest(pool,async(route,method,body)=>{calls.push({route,body});return {sent:true};},job,async()=>({reply:'Prepared translation',status:'completed'}));
  assert.equal(result.sent,true);assert.equal(calls[0].body.status,'completed');assert.equal(calls[0].body.reply,'Prepared translation');assert.equal(calls.filter(c=>c.route==='/operator/result').length,1);
+});
+
+test('verified file is bound to request and sender before one CAS delivery',async()=>{
+ const bytes=Buffer.from('item,total\napples,91');const queries=[],calls=[];
+ const pool={query:async(sql,args)=>{queries.push({sql,args});return {rows:[]};}};
+ const result=await processRequest(pool,async(route,method,body)=>{calls.push({route,body});return {sent:true};},job,async()=>({reply:'Файл бэлэн.',status:'completed',artifacts:[{name:'result.csv',mime:'application/octet-stream',bytes,sha256:createHash('sha256').update(bytes).digest('hex')}]}));
+ assert.equal(result.sent,true);
+ const insert=queries.find(q=>q.sql.startsWith('INSERT INTO messenger_artifacts'));
+ assert.equal(insert.args[1],job.id);assert.equal(insert.args[2],job.sender_id);assert.deepEqual(insert.args[5],bytes);
+ assert.equal(calls.filter(c=>c.route==='/operator/result').length,1);
+ assert.match(calls[0].body.reply,/https:\/\/agent-room-messenger-ingress\.onrender\.com\/artifact\/[a-f0-9]{64}/);
+ assert.ok(calls[0].body.reply.length<=1800);
+});
+
+test('tampered file cannot be sent as completed work',async()=>{
+ let sends=0;
+ const result=await processRequest({query:async()=>({rows:[]})},async()=>{sends++;return {sent:true};},job,async()=>({reply:'done',status:'completed',artifacts:[{name:'result.txt',mime:'text/plain',bytes:Buffer.from('changed'),sha256:'0'.repeat(64)}]}));
+ assert.equal(sends,0);assert.equal(result.review,true);
 });
