@@ -1,1 +1,19 @@
-{"name":"agent-room-messenger-ingress","version":"1.1.0","private":true,"type":"module","engines":{"node":">=22"},"scripts":{"start":"node server.mjs","test":"node --test test.mjs cloud-worker.test.mjs"},"dependencies":{"pg":"8.16.3","@openai/codex":"0.164.0"}}
+{
+  "name": "agent-room-messenger-ingress",
+  "version": "1.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node server.mjs",
+    "test": "node --test test.mjs cloud-worker.test.mjs"
+  },
+  "dependencies": {
+    "pg": "8.16.3",
+    "@openai/codex": "0.164.0",
+    "@runno/sandbox": "0.10.2",
+    "@modelcontextprotocol/sdk": "1.32.2"
+  }
+}
