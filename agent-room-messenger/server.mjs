@@ -2,6 +2,7 @@ import http from 'node:http';
 import {randomUUID} from 'node:crypto';
 import pg from 'pg';
 import {sameSecret,validSignature,extractEvents} from './core.mjs';
+import {operatorSchema,handleOperator,sendPage} from './operator.mjs';
 const PAGE=process.env.META_PAGE_ID||'1309261702280978';
 const pool=process.env.DATABASE_URL?new pg.Pool({connectionString:process.env.DATABASE_URL,max:3,connectionTimeoutMillis:5000,idleTimeoutMillis:10000}):null;
 let ready=false;
@@ -11,6 +12,12 @@ async function rawBody(req){const chunks=[];let size=0;for await(const chunk of 
 const server=http.createServer(async(req,res)=>{
  try{
   const url=new URL(req.url,'http://localhost');
+  if(url.pathname.startsWith('/operator/')){
+   if(!process.env.OPERATOR_TOKEN||!sameSecret(req.headers.authorization,'Bearer '+process.env.OPERATOR_TOKEN))return reply(res,401,{error:'Unauthorized'});
+   if(!ready)return reply(res,503,{error:'Storage unavailable'});
+   let b={};if(req.method==='POST'){try{b=JSON.parse((await rawBody(req)).toString('utf8'))}catch{return reply(res,400,{error:'Invalid request'})}}
+   const result=await handleOperator(url.pathname,req.method,b,pool);return reply(res,result.error?409:200,result);
+  }
   if(req.method==='GET'&&url.pathname==='/health'){if(!ready)return reply(res,503,{ready:false});await pool.query('SELECT 1');return reply(res,200,{ready:true,webhookConfigured:Boolean(process.env.META_APP_SECRET&&process.env.META_VERIFY_TOKEN),emailDeliveryEnabled:false})}
   if(url.pathname==='/webhook'&&req.method==='GET'){
    if(!process.env.META_VERIFY_TOKEN||!ready)return reply(res,503,{error:'Not configured'});
@@ -28,6 +35,7 @@ const server=http.createServer(async(req,res)=>{
     if(inserted.rowCount&&process.env.NOTIFICATION_EMAIL)await db.query("INSERT INTO messenger_notifications(id,request_id,event_type,recipient) VALUES($1,$2,'new_request',$3) ON CONFLICT DO NOTHING",[randomUUID(),id,process.env.NOTIFICATION_EMAIL]);
    }await db.query('COMMIT')}catch{await db.query('ROLLBACK');throw Error('Storage unavailable')}finally{db.release()}
    // Acknowledge only after durable commit. Notification rows do not mean an email was sent.
+   console.log(JSON.stringify({event:'webhook_committed',eventCount:messages.length}));
    return reply(res,200,{received:true});
   }
   if(req.method==='GET'&&url.pathname==='/operator/pending'){
@@ -39,6 +47,6 @@ const server=http.createServer(async(req,res)=>{
   return reply(res,404,{error:'Not found'});
  }catch(e){return reply(res,e.message==='TOO_LARGE'?413:503,{error:e.message==='TOO_LARGE'?'Payload too large':'Service unavailable'})}
 });
-await initialize().catch(()=>{console.error('Database initialization unavailable');process.exitCode=1});
+await initialize().then(()=>ready?operatorSchema(pool):null).catch(()=>{ready=false;console.error('Database initialization unavailable');process.exitCode=1});
 if(ready){server.listen(Number(process.env.PORT||10000),'0.0.0.0',()=>console.log('Messenger ingress listening'));}
 process.on('SIGTERM',()=>server.close(()=>pool?.end().finally(()=>process.exit(0))));
