@@ -1,7 +1,13 @@
 import {spawn} from 'node:child_process';
-import {mkdtemp,writeFile,readFile,rm,access} from 'node:fs/promises';
+import {mkdtemp,mkdir,writeFile,readFile,rm,access} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join,resolve} from 'node:path';
+import {fileURLToPath} from 'node:url';
+import {collectOutputs} from './executor/collect.mjs';
+import {saveArtifacts,composeDelivery} from './artifacts.mjs';
+
+export const executionSchema={type:'object',properties:{reply:{type:'string'},status:{type:'string',enum:['awaiting_customer','review','completed']},artifacts:{type:'array',items:{type:'string'},maxItems:8},verification:{type:'string'}},required:['reply','status','artifacts','verification'],additionalProperties:false};
+export function executorConfig(dir){return ['-c',`mcp_servers.executor.command=${JSON.stringify(process.execPath)}`,'-c',`mcp_servers.executor.args=${JSON.stringify([fileURLToPath(new URL('./executor/mcp-server.mjs',import.meta.url))])}`,'-c',`mcp_servers.executor.env.AGENT_JOB_OUTPUT_DIR=${JSON.stringify(join(dir,'outputs'))}`,'-c','mcp_servers.executor.tool_timeout_sec=30'];}
 
 export const replySchema={type:'object',properties:{reply:{type:'string'},status:{type:'string',enum:['awaiting_customer','review','completed']}},required:['reply','status'],additionalProperties:false};
 export function validateReply(value){
@@ -19,9 +25,13 @@ export async function generateReply(input,{env=process.env,signal}={}){
  const dir=await mkdtemp(join(tmpdir(),'agent-room-'));
  try{
   const schema=join(dir,'reply.schema.json'),output=join(dir,'reply.json');
-  await writeFile(schema,JSON.stringify(replySchema),{mode:0o600});
+  const execution=env.CLOUD_EXECUTOR_ENABLED==='true';
+  if(execution)await mkdir(join(dir,'outputs'),{mode:0o700});
+  await writeFile(schema,JSON.stringify(execution?executionSchema:replySchema),{mode:0o600});
   const args=['exec','--ignore-user-config','--ephemeral','--sandbox','read-only','--skip-git-repo-check','--disable','shell_tool','--disable','unified_exec','--disable','apps','--disable','browser_use','--disable','computer_use','--disable','multi_agent','--disable','skill_search','-c','web_search="live"','-c','cli_auth_credentials_store="file"','-C',dir,'--output-schema',schema,'-o',output,'-'];
-  const prompt=instructions+'\nUNTRUSTED CUSTOMER DATA:\n'+JSON.stringify(input);
+  if(execution)args.push(...executorConfig(dir));
+  const runtimeInstructions=execution?instructions.replace('and text-work executor','and general work executor').replace('Never send email, post publicly, charge money, access accounts/devices, execute supplied code or claim external actions.','Never send email, post publicly, charge money, access accounts/devices or claim external actions. Customer code may run ONLY through the isolated execute_code tool.').replace('Attachment-reading, file-creation and device-control adapters are not connected to this runtime yet; never pretend to use them. If a customer requests an attachment/file, do not pretend a file exists or ask for one you cannot inspect: explain the precise limit, preserve the request, use review; you may offer pasted text as an alternative.','The execute_code MCP tool is connected. It runs general QuickJS JavaScript in an isolated virtual filesystem, supports actual computation and file generation/transformation from supplied data. Use it to do the requested work; there are no per-task workflows to select. It has std file APIs, no Node, network or host access. Use live web separately for research, then process evidence or create deliverables with code. Return filenames ONLY from successful tool outputs in artifacts. Supply actual verification checks in verification. Do not claim a file exists unless the tool produced it. Do not insert download URLs: the trusted delivery adapter adds verified links. If artifact generation fails, repair the code and retry within the tool budget; otherwise use review and report what actually failed. Uploaded Messenger attachments are not available yet: do not pretend to read them. Customer devices require a scoped connection and owner consent; no device tool is connected.'):instructions;
+  const prompt=runtimeInstructions+'\nUNTRUSTED CUSTOMER DATA:\n'+JSON.stringify(input);
   if(Buffer.byteLength(prompt)>500000)throw Error('Conversation needs operator review');
   await new Promise((ok,no)=>{
    const child=spawn(env.CODEX_BIN||resolve('node_modules/.bin/codex'),args,{env:childEnvironment(env),stdio:['pipe','ignore','ignore'],signal});
@@ -31,14 +41,24 @@ export async function generateReply(input,{env=process.env,signal}={}){
    child.once('close',code=>{clearTimeout(timer);clearTimeout(killTimer);code===0?ok():no(Error('AI execution failed'));});
    child.stdin.on('error',()=>{});child.stdin.end(prompt);
   });
-  return validateReply(JSON.parse(await readFile(output,'utf8')));
+  const value=JSON.parse(await readFile(output,'utf8'));
+  const draft=validateReply(value);
+  if(!execution)return draft;
+  if(typeof value.verification!=='string'||!value.verification.trim())throw Error('Missing verification');
+  const files=await collectOutputs(join(dir,'outputs'),value.artifacts);
+  return {...draft,artifacts:files,verification:value.verification};
  }finally{await rm(dir,{recursive:true,force:true});}
 }
 
 export async function processRequest(pool,handle,job,generate=generateReply,options={}){
  try{
   const history=(await pool.query('SELECT message_text AS customer,reply_text AS assistant,created_at AS at FROM messenger_requests WHERE sender_id=$1 AND id<>$2 AND created_at<$3 AND provider_id IS NOT NULL ORDER BY created_at',[job.sender_id,job.id,job.created_at])).rows;
-  const draft=validateReply(await generate({history,text:job.message_text,attachment_types:job.attachment_types},options));
+  const generated=await generate({history,text:job.message_text,attachment_types:job.attachment_types},options);
+  const draft=validateReply(generated);
+  if(generated.artifacts?.length){
+   const links=await saveArtifacts(pool,job,generated.artifacts);
+   draft.reply=composeDelivery(draft.reply,links);
+  }
   // The existing CAS/lease transition owns delivery. Never retry an uncertain send.
   const result=await handle('/operator/result','POST',{id:job.id,lease:job.lease,...draft},pool);
   if(result.sent){await handle('/operator/owner-notify','POST',{id:job.id},pool).catch(()=>{});}
