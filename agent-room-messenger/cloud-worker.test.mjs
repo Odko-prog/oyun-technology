@@ -2,7 +2,7 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {validateReply,childEnvironment,processRequest,startCloudWorker} from './cloud-worker.mjs';
 test('rejects empty, oversized and unexpected reply states',()=>{
- for(const v of [{reply:'',status:'review'},{reply:'x'.repeat(1801),status:'review'},{reply:'done',status:'completed'},null])assert.throws(()=>validateReply(v));
+ for(const v of [{reply:'',status:'review'},{reply:'x'.repeat(1801),status:'review'},{reply:'done',status:'unknown'},null])assert.throws(()=>validateReply(v));
  assert.equal(validateReply({reply:'Туршилт',status:'awaiting_customer'}).reply,'Туршилт');
 });
 test('model process never inherits operational credentials',()=>{
@@ -30,4 +30,10 @@ test('model failure marks only matching processing lease for review without send
 test('disabled cloud worker cannot claim or send',async()=>{
  const worker=startCloudWorker({},()=>{throw Error('must not run');},{env:{CLOUD_WORKER_ENABLED:'false'}});
  await worker.done;assert.equal(worker.state.status,'disabled');await worker.stop();
+});
+
+test('completed text work is delivered once and retains completion status',async()=>{
+ const calls=[];const pool={query:async()=>({rows:[]})};
+ const result=await processRequest(pool,async(route,method,body)=>{calls.push({route,body});return {sent:true};},job,async()=>({reply:'Prepared translation',status:'completed'}));
+ assert.equal(result.sent,true);assert.equal(calls[0].body.status,'completed');assert.equal(calls[0].body.reply,'Prepared translation');assert.equal(calls.filter(c=>c.route==='/operator/result').length,1);
 });
