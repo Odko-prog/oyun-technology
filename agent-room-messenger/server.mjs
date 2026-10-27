@@ -1,4 +1,5 @@
 import http from 'node:http';
+import {startCloudWorker} from './cloud-worker.mjs';
 import {randomUUID} from 'node:crypto';
 import pg from 'pg';
 import {sameSecret,validSignature,extractEvents} from './core.mjs';
@@ -6,6 +7,7 @@ import {operatorSchema,handleOperator,sendPage} from './operator.mjs';
 const PAGE=process.env.META_PAGE_ID||'1309261702280978';
 const pool=process.env.DATABASE_URL?new pg.Pool({connectionString:process.env.DATABASE_URL,max:3,connectionTimeoutMillis:5000,idleTimeoutMillis:10000}):null;
 let ready=false;
+let cloudWorker=null;
 async function initialize(){if(!pool)return;await pool.query(`CREATE TABLE IF NOT EXISTS messenger_requests(id UUID PRIMARY KEY,source_id TEXT NOT NULL UNIQUE,sender_id TEXT NOT NULL,message_text TEXT NOT NULL,attachment_types JSONB NOT NULL,source_timestamp BIGINT,status TEXT NOT NULL DEFAULT 'received',created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()); CREATE TABLE IF NOT EXISTS messenger_notifications(id UUID PRIMARY KEY,request_id UUID NOT NULL REFERENCES messenger_requests(id),event_type TEXT NOT NULL,recipient TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'pending',created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),UNIQUE(request_id,event_type));`);ready=true}
 function reply(res,status,body){res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});res.end(JSON.stringify(body))}
 async function rawBody(req){const chunks=[];let size=0;for await(const chunk of req){size+=chunk.length;if(size>65536)throw Error('TOO_LARGE');chunks.push(chunk)}return Buffer.concat(chunks)}
@@ -19,7 +21,7 @@ const server=http.createServer(async(req,res)=>{
    let b={};if(req.method==='POST'){try{b=JSON.parse((await rawBody(req)).toString('utf8'))}catch{return reply(res,400,{error:'Invalid request'})}}
    const result=await handleOperator(url.pathname,req.method,b,pool);return reply(res,result.error?409:200,result);
   }
-  if(req.method==='GET'&&url.pathname==='/health'){if(!ready)return reply(res,503,{ready:false});await pool.query('SELECT 1');return reply(res,200,{ready:true,webhookConfigured:Boolean(process.env.META_APP_SECRET&&process.env.META_VERIFY_TOKEN),emailDeliveryEnabled:false})}
+  if(req.method==='GET'&&url.pathname==='/health'){if(!ready)return reply(res,503,{ready:false});await pool.query('SELECT 1');return reply(res,200,{ready:true,webhookConfigured:Boolean(process.env.META_APP_SECRET&&process.env.META_VERIFY_TOKEN),emailDeliveryEnabled:false,cloudWorker:cloudWorker?.state||{status:'disabled'}})}
   if(url.pathname==='/webhook'&&req.method==='GET'){
    if(!process.env.META_VERIFY_TOKEN||!ready)return reply(res,503,{error:'Not configured'});
    if(url.searchParams.get('hub.mode')==='subscribe'&&sameSecret(url.searchParams.get('hub.verify_token'),process.env.META_VERIFY_TOKEN)){
@@ -49,5 +51,5 @@ const server=http.createServer(async(req,res)=>{
  }catch(e){return reply(res,e.message==='TOO_LARGE'?413:503,{error:e.message==='TOO_LARGE'?'Payload too large':'Service unavailable'})}
 });
 await initialize().then(()=>ready?operatorSchema(pool):null).catch(()=>{ready=false;console.error('Database initialization unavailable');process.exitCode=1});
-if(ready){server.listen(Number(process.env.PORT||10000),'0.0.0.0',()=>console.log('Messenger ingress listening'));}
-process.on('SIGTERM',()=>server.close(()=>pool?.end().finally(()=>process.exit(0))));
+if(ready){cloudWorker=startCloudWorker(pool,handleOperator);server.listen(Number(process.env.PORT||10000),'0.0.0.0',()=>console.log('Messenger ingress listening'));}
+process.on('SIGTERM',async()=>{await cloudWorker?.stop();server.close(()=>pool?.end().finally(()=>process.exit(0)));});
