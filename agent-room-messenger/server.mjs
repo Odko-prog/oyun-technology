@@ -50,6 +50,6 @@ const server=http.createServer(async(req,res)=>{
   return reply(res,404,{error:'Not found'});
  }catch(e){return reply(res,e.message==='TOO_LARGE'?413:503,{error:e.message==='TOO_LARGE'?'Payload too large':'Service unavailable'})}
 });
-await initialize().then(()=>ready?operatorSchema(pool):null).catch(()=>{ready=false;console.error('Database initialization unavailable');process.exitCode=1});
+for(let attempt=0;attempt<12&&!ready;attempt++){try{await initialize();if(ready)await operatorSchema(pool);}catch(error){ready=false;console.error(JSON.stringify({event:'database_initialization_unavailable',code:typeof error.code==='string'?error.code:'unknown',attempt:attempt+1}));await new Promise(resolve=>setTimeout(resolve,5000));}}if(!ready)process.exitCode=1;
 if(ready){cloudWorker=startCloudWorker(pool,handleOperator);server.listen(Number(process.env.PORT||10000),'0.0.0.0',()=>console.log('Messenger ingress listening'));}
 process.on('SIGTERM',async()=>{await cloudWorker?.stop();server.close(()=>pool?.end().finally(()=>process.exit(0)));});
