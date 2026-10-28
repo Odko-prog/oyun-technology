@@ -19,6 +19,20 @@ test('model process never inherits operational credentials',()=>{
  assert.deepEqual(env,{PATH:'/bin',CODEX_HOME:'/data/codex'});
 });
 const job={id:'job-1',sender_id:'sender-A',lease:'lease-1',created_at:'2026-10-27T00:00:00Z',message_text:'fixture',attachment_types:[]};
+test('invented or disabled customer device cannot be queued or acknowledged',async()=>{
+ for(const enabled of ['false','true']){
+  let sends=0;const result=await processRequest({query:async()=>({rows:[]})},async()=>{sends++;return {sent:true};},job,async()=>({reply:'Pending local approval',status:'awaiting_customer',device_task:{session_id:'12345678-0000-4000-8000-123456789012',goal:'Work'}}),{env:{DEVICE_BRIDGE_ENABLED:enabled}});
+  assert.equal(result.review,true);assert.equal(sends,0);
+ }
+});
+test('a delivered review reply still reports that the underlying work needs review',async()=>{
+ const result=await processRequest({query:async()=>({rows:[]})},async()=>({sent:true}),job,async()=>({reply:'Specific capability missing',status:'review'}));assert.equal(result.sent,true);assert.equal(result.review,true);
+});
+test('verified Page pairing never forwards the pairing code as model instructions',async()=>{
+ let observed;const pool={query:async()=>({rows:[]})};const key='a'.repeat(64);
+ await processRequest(pool,async()=>({sent:true}),{...job,device_pairing:true,message_text:'AGENT-CONNECT '+key},async input=>{observed=input;return {reply:'Local owner confirmation is still required.',status:'awaiting_customer'};});
+ assert.deepEqual(observed.device_pairing,{matched:true,state:'pending_owner'});assert.ok(!JSON.stringify(observed).includes(key));assert.equal(observed.text,'Компьютер холбох хүсэлт');
+});
 test('unproven continuation cannot reach the real delivery adapter',async()=>{
  let sends=0;
  const r=await actualProcessRequest({query:async()=>({rows:[]})},async()=>{sends++;return {sent:true};},job,async()=>({reply:'Done',status:'completed',continues_request_id:'12345678-0000-4000-8000-123456789014'}));
