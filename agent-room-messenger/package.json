@@ -8,7 +8,7 @@
   },
   "scripts": {
     "start": "node server.mjs",
-    "test": "node --test test.mjs cloud-worker.test.mjs"
+    "test": "node --test test.mjs cloud-worker.test.mjs inputs.test.mjs"
   },
   "dependencies": {
     "pg": "8.16.3",
