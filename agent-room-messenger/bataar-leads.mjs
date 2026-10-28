@@ -30,7 +30,8 @@ export function leadStep(previous,text){
    const skip=/^(алгасах|skip|algasah)$/iu.test(t);const phone=raw.replace(/[\s()-]/g,'');
    if(!skip&&!/^\+?\d{8,15}$/.test(phone))return {...state,reply:'Утсаа 8–15 оронтой бичих, эсвэл “Алгасах” гэж бичнэ үү. Нууц үг, дансны мэдээлэл битгий илгээгээрэй.'};
    const data={...state.data,contact:skip?'Энэ Messenger яриагаар':phone};
-   return {stage:'confirm',data,reply:`Хүсэлтийн мэдээлэл:\nХугацаа: ${data.dates}\nХүн: ${data.people}\nЧиглэл: ${data.tour}\nХолбоо: ${data.contact}\nЭнэ мэдээллийг баазын ажилтанд үзүүлэхээр бүртгэх үү? “Баталъя” эсвэл “Цуцлах” гэж бичнэ үү. Үнэ, сул байр, захиалгыг ажилтан эцэслэнэ.`};
+   const wildlife=/ирвэс|snow\s*leopard/iu.test(data.tour)?'\nИрвэс байгальд чөлөөтэй амьдардаг тул ажиглалт нь амьтдын хөдөлгөөн, тухайн үеийн нөхцөлөөс хамаарна; заавал харагдана гэж амлах боломжгүй.':' ';
+   return {stage:'confirm',data,reply:`Хүсэлтийн мэдээлэл:\nХугацаа: ${data.dates}\nХүн: ${data.people}\nЧиглэл: ${data.tour}\nХолбоо: ${data.contact}${wildlife.trimEnd()}\nЭнэ мэдээллийг баазын ажилтанд үзүүлэхээр бүртгэх үү? “Баталъя” эсвэл “Цуцлах” гэж бичнэ үү. Үнэ, сул байр, захиалгыг ажилтан эцэслэнэ.`};
  }
  if(state.stage==='confirm')return yes.test(t)?{stage:'pending-staff',data:state.data,reply:'Хүсэлтийг ажилтан шалгах төлөвтэй бүртгэлээ. Захиалга батлагдаагүй, төлбөр авахгүй. Яаралтай бол 99530099 дугаарт холбогдоно уу.'}:{...state,reply:'Мэдээлэл зөв бол “Баталъя”, өөрчлөх бол “Цуцлах” гэж бичээд дахин хүсэлт эхлүүлж болно.'};
  return null;
@@ -43,3 +44,5 @@ export async function handleTravelLead(db,event){
  ON CONFLICT(id) DO UPDATE SET stage=EXCLUDED.stage,data=EXCLUDED.data,updated_at=NOW()`,[id,event.page_id,event.sender_id,next.stage,JSON.stringify(next.data)]);
  return next.reply+(next.stage==='pending-staff'?'\n'+(next.data.isTest?'ТУРШИЛТ — бодит аяллын хүсэлт биш.\n':'')+'Хүсэлтийн дугаар: '+id:'');
 }
+
+
