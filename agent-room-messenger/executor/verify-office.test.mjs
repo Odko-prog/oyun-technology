@@ -30,6 +30,14 @@ test('PPTX main package and exact namespace are validated without claiming slide
  entries[2][1]='<p:presentation xmlns:p="https://fake.invalid/presentationml"/>';
  await assert.rejects(verifyOfficeOutput(zip(entries),'bad.pptx'),/root/);
 });
+test('XLSX main content type and workbook relationships are checked without formula recalculation claims',async()=>{
+ const entries=[['[Content_Types].xml','<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/></Types>'],['_rels/.rels',rel('xl/workbook.xml')],['xl/workbook.xml','<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"/>']];
+ assert.equal((await verifyOfficeOutput(zip(entries),'answer.xlsx')).structuralValidation,'passed');entries[2][1]='<workbook xmlns="urn:wrong"/>';await assert.rejects(verifyOfficeOutput(zip(entries),'bad.xlsx'),/root/);
+});
+test('OPC Default XML main content type is valid when no main Override exists',async()=>{
+ const entries=[['[Content_Types].xml','<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/></Types>'],['_rels/.rels',rel('/xl/workbook.xml')],['xl/workbook.xml','<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"/>']];assert.equal((await verifyOfficeOutput(zip(entries),'fixture.xlsx')).format,'xlsx');
+ entries[0][1]=entries[0][1].replace('</Types>','<Override PartName="/xl/workbook.xml" ContentType="wrong"/></Types>');await assert.rejects(verifyOfficeOutput(zip(entries),'bad.xlsx'),/mismatch/);
+});
 test('Office missing parts, wrong type, malformed XML, DTD and active content fail closed',async()=>{
  const missing=fixture().slice(0,2),wrong=fixture();wrong[0][1]=wrong[0][1].replace('document.main+xml','template.main+xml');
  const malformed=fixture();malformed[2][1]='<broken>';
