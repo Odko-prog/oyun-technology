@@ -1,3 +1,4 @@
+import {startBataarWorker} from './bataar-worker.mjs';
 import {deviceSchema,handleDeviceRequest,bindStoredDeviceFromSignedPage} from './device-store.mjs';
 import {deviceTaskSchema} from './device-tasks.mjs';
 import {goalSchema} from './goals.mjs';
@@ -16,6 +17,7 @@ const localAgentAssets=onboardingAssets();
 const pool=process.env.DATABASE_URL?new pg.Pool({connectionString:process.env.DATABASE_URL,max:3,connectionTimeoutMillis:5000,idleTimeoutMillis:10000}):null;
 let ready=false;
 let cloudWorker=null;
+let bataarWorker=null;
 async function initialize(){if(!pool)return;await pool.query(`CREATE TABLE IF NOT EXISTS messenger_requests(id UUID PRIMARY KEY,source_id TEXT NOT NULL UNIQUE,sender_id TEXT NOT NULL,message_text TEXT NOT NULL,attachment_types JSONB NOT NULL,source_timestamp BIGINT,status TEXT NOT NULL DEFAULT 'received',created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()); CREATE TABLE IF NOT EXISTS messenger_notifications(id UUID PRIMARY KEY,request_id UUID NOT NULL REFERENCES messenger_requests(id),event_type TEXT NOT NULL,recipient TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'pending',created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),UNIQUE(request_id,event_type));`);ready=true}
 function reply(res,status,body){res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});res.end(JSON.stringify(body))}
 let activeDeviceBodies=0;
@@ -41,7 +43,7 @@ const server=http.createServer(async(req,res)=>{
    let b={};if(req.method==='POST'){try{b=JSON.parse((await rawBody(req)).toString('utf8'))}catch{return reply(res,400,{error:'Invalid request'})}}
    const result=await handleOperator(url.pathname,req.method,b,pool);return reply(res,result.error?409:200,result);
   }
-  if(req.method==='GET'&&url.pathname==='/health'){if(!ready)return reply(res,503,{ready:false});await pool.query('SELECT 1');return reply(res,200,{ready:true,webhookConfigured:Boolean(process.env.META_APP_SECRET&&process.env.META_VERIFY_TOKEN),emailDeliveryEnabled:false,cloudWorker:cloudWorker?.state||{status:'disabled'}})}
+  if(req.method==='GET'&&url.pathname==='/health'){if(!ready)return reply(res,503,{ready:false});await pool.query('SELECT 1');return reply(res,200,{ready:true,webhookConfigured:Boolean(process.env.META_APP_SECRET&&process.env.META_VERIFY_TOKEN),emailDeliveryEnabled:false,cloudWorker:cloudWorker?.state||{status:'disabled'},bataarWorker:bataarWorker?.state||{status:'disabled'}})}
   if(url.pathname==='/webhook'&&req.method==='GET'){
    if(!process.env.META_VERIFY_TOKEN||!ready)return reply(res,503,{error:'Not configured'});
    if(url.searchParams.get('hub.mode')==='subscribe'&&sameSecret(url.searchParams.get('hub.verify_token'),process.env.META_VERIFY_TOKEN)){
@@ -72,5 +74,5 @@ const server=http.createServer(async(req,res)=>{
  }catch(e){return reply(res,e.message==='TOO_LARGE'?413:503,{error:e.message==='TOO_LARGE'?'Payload too large':'Service unavailable'})}
 });
 for(let attempt=0;attempt<12&&!ready;attempt++){try{await initialize();if(ready){await operatorSchema(pool);await artifactSchema(pool);await inputSchema(pool);await conversationSchema(pool);await goalSchema(pool);await deviceSchema(pool);await deviceTaskSchema(pool);}}catch(error){ready=false;console.error(JSON.stringify({event:'database_initialization_unavailable',code:typeof error.code==='string'?error.code:'unknown',attempt:attempt+1}));await new Promise(resolve=>setTimeout(resolve,5000));}}if(!ready)process.exitCode=1;
-if(ready){cloudWorker=startCloudWorker(pool,handleOperator);server.listen(Number(process.env.PORT||10000),'0.0.0.0',()=>console.log('Messenger ingress listening'));}
-process.on('SIGTERM',async()=>{await cloudWorker?.stop();server.close(()=>pool?.end().finally(()=>process.exit(0)));});
+if(ready){cloudWorker=startCloudWorker(pool,handleOperator);bataarWorker=startBataarWorker(pool);server.listen(Number(process.env.PORT||10000),'0.0.0.0',()=>console.log('Messenger ingress listening'));}
+process.on('SIGTERM',async()=>{await Promise.all([cloudWorker?.stop(),bataarWorker?.stop()]);server.close(()=>pool?.end().finally(()=>process.exit(0)));});
