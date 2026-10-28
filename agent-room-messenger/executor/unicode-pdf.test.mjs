@@ -33,6 +33,6 @@ test('pasted tabs normalize to spaces without losing Mongolian text',async()=>{
  assert.throws(()=>createUnicodePdf('\t'.repeat(13000),font),/text limit/);
 });
 test('shaping and bidirectional text fails explicitly instead of wrong visual output',()=>{
- for(const text of ['مرحبا','שלום','e\u0301','Монгол\u202e123'])assert.throws(()=>createUnicodePdf(text,font),/unsupported shaping or bidirectional/);
+ for(const text of ['مرحبا','שלום','e\u0301','Монгол\u202e123'])assert.throws(()=>createUnicodePdf(text,font),{code:'PDF_TEXT_UNSUPPORTED'});
  assert.doesNotThrow(()=>createUnicodePdf('Монгол Өө Үү Ёё 1765',font));
 });
