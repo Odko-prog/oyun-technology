@@ -4,6 +4,7 @@ import {CallToolRequestSchema,ListToolsRequestSchema} from '@modelcontextprotoco
 import {executeCode} from './execute.mjs';
 import {readDocument} from './read-document.mjs';
 import {verifyOfficeOutput} from './verify-office.mjs';
+import {verifyPdfOutput} from './verify-pdf.mjs';
 import {writeFile,mkdir,readFile,lstat} from 'node:fs/promises';
 import {join,resolve} from 'node:path';
 import {createHash} from 'node:crypto';
@@ -48,9 +49,11 @@ server.setRequestHandler(CallToolRequestSchema,async request=>{
    const bytes=Buffer.from(f.base64,'base64');
    let officeValidation;
    try{officeValidation=await verifyOfficeOutput(bytes,f.name);}catch{const error=Error('Office output structure invalid');error.code='OFFICE_STRUCTURE_INVALID';throw error;}
+   let pdfValidation;
+   try{pdfValidation=await verifyPdfOutput(bytes,f.name);}catch{const error=Error('PDF output structure invalid');error.code='PDF_STRUCTURE_INVALID';throw error;}
    const sha256=createHash('sha256').update(bytes).digest('hex');
    const stored=`${calls}-${sha256}`;
-   prepared.push({name:f.name,stored,data:bytes,bytes:bytes.length,sha256,...(officeValidation?{officeValidation}:{})});
+   prepared.push({name:f.name,stored,data:bytes,bytes:bytes.length,sha256,...(officeValidation?{officeValidation}:{}),...(pdfValidation?{pdfValidation}:{})});
   }
   // Verify the complete output set before persisting any receipt or exported bytes.
   for(const {data:bytes,...f} of prepared){
@@ -60,8 +63,7 @@ server.setRequestHandler(CallToolRequestSchema,async request=>{
   }
   await writeFile(join(outputDir,`receipt-${calls}.json`),JSON.stringify(outputs),{mode:0o600,flag:'wx'});
   return {isError:r.type!=='complete'||r.exitCode!==0,content:[{type:'text',text:JSON.stringify({type:r.type,exitCode:r.exitCode,stdout:r.stdout,stderr:r.stderr,outputs:outputs.map(({stored,...f})=>f)})}]};
- }catch(error){return {isError:true,content:[{type:'text',text:error?.code==='OFFICE_STRUCTURE_INVALID'?'Office output structural validation failed. Repair the actual ZIP CRC, XML, main content type and relationship targets, then export again. No files from this call were accepted; visual rendering was not performed.':'Execution failed; no deliverable was verified.'}]};}
+ }catch(error){return {isError:true,content:[{type:'text',text:error?.code==='OFFICE_STRUCTURE_INVALID'?'Office output structural validation failed. Repair the actual ZIP CRC, XML, main content type and relationship targets, then export again. No files from this call were accepted; visual rendering was not performed.':error?.code==='PDF_STRUCTURE_INVALID'?'PDF output structural validation failed. Export a complete unencrypted PDF with valid pages and text streams, header and EOF marker, within 5 MB and 100 pages. No files from this call were accepted; visual rendering was not performed.':'Execution failed; no deliverable was verified.'}]};}
  finally{busy=false;}
 });
 await server.connect(new StdioServerTransport());
-
