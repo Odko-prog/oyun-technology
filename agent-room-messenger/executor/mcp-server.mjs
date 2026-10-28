@@ -1,3 +1,4 @@
+import {createUnicodePdf} from './unicode-pdf.mjs';
 import {Server} from '@modelcontextprotocol/sdk/server/index.js';
 import {StdioServerTransport} from '@modelcontextprotocol/sdk/server/stdio.js';
 import {CallToolRequestSchema,ListToolsRequestSchema} from '@modelcontextprotocol/sdk/types.js';
@@ -26,9 +27,9 @@ const server=new Server({name:'agent-room-executor',version:'0.1.0'},{capabiliti
 server.setRequestHandler(ListToolsRequestSchema,async()=>({tools:[{
  name:'execute_code',description:'Execute general JavaScript in an isolated WASI virtual filesystem. Use for computation, data transformation and generating real files, not a task-specific workflow. No network, host files, Node.js, process or customer account access. QuickJS ES modules: import * as std from "std"; std.open(path,"w"), puts(), close(); /output exists. For binary output use a Uint8Array and std.open(path,"wb"), then file.write(data.buffer,data.byteOffset,data.byteLength) and file.close(); check the write count. Generate the real file format bytes, never rename plain text to a binary format. For Mongolian or other non-Latin PDF text, raw UTF-8 in a standard Helvetica/Type1 text string is insufficient: use a genuinely available font with the required glyphs, embed its permitted font program and provide correct character encoding and ToUnicode mapping. Never invent a font file or claim embedding/render verification from parser success. If those bytes or a supported renderer are unavailable, preserve the original Unicode in a supported editable document or text deliverable, clearly explain the PDF limitation, and do not transliterate or replace requested letters silently. Read supplied input files under /input; write finished files under /output with safe flat names. Files are collected and verified as actual bytes. Research uses the separate live web tool. Each call starts fresh. Return exported filenames in the final response; do not invent files.',
  inputSchema:{type:'object',properties:{code:{type:'string',maxLength:200000},files:{type:'object',description:'Optional /input/name to base64 encoded input bytes',additionalProperties:{type:'string'}},timeout:{type:'number',minimum:1,maximum:20}},required:['code'],additionalProperties:false}
-},{name:'read_input',description:'Read actual supplied UTF-8 text, bounded DOCX/PPTX text parts, XLSX cell values and stored formula/cache text, or a PDF text layer using an isolated bounded parser. Only this job files can be read. Returns actual text, coverage and nextOffset. Continue paging when needed; returned text is not visual rendering. Spreadsheet formulas are never executed or recalculated; dates and formatting are not interpreted. PDF pages with empty text may require OCR; scanned text, images, embedded objects, equations and layout are not interpreted. Filenames alone do not prove contents.',annotations:{readOnlyHint:true,destructiveHint:false,openWorldHint:false},inputSchema:{type:'object',properties:{name:{type:'string'},offset:{type:'integer',minimum:0}},required:['name'],additionalProperties:false}}]}));
+},{name:'create_text_pdf',description:'Create a real plain text PDF with bundled embedded DejaVu font and Unicode mapping. Mongolian Cyrillic and supported BMP glyphs only; missing glyphs fail. Word wrapping and short-paragraph pagination, no tables, images, shaping or equation layout. Supply final text, maximum50000characters; output is structurally validated, not visually rendered.',inputSchema:{type:'object',properties:{name:{type:'string'},text:{type:'string',maxLength:50000}},required:['name','text'],additionalProperties:false}},{name:'read_input',description:'Read actual supplied UTF-8 text, bounded DOCX/PPTX text parts, XLSX cell values and stored formula/cache text, or a PDF text layer using an isolated bounded parser. Only this job files can be read. Returns actual text, coverage and nextOffset. Continue paging when needed; returned text is not visual rendering. Spreadsheet formulas are never executed or recalculated; dates and formatting are not interpreted. PDF pages with empty text may require OCR; scanned text, images, embedded objects, equations and layout are not interpreted. Filenames alone do not prove contents.',annotations:{readOnlyHint:true,destructiveHint:false,openWorldHint:false},inputSchema:{type:'object',properties:{name:{type:'string'},offset:{type:'integer',minimum:0}},required:['name'],additionalProperties:false}}]}));
 server.setRequestHandler(CallToolRequestSchema,async request=>{
- if(!['execute_code','read_input'].includes(request.params.name))throw Error('Unknown tool');
+ if(!['execute_code','read_input','create_text_pdf'].includes(request.params.name))throw Error('Unknown tool');
  if(busy||++calls>12)return {isError:true,content:[{type:'text',text:'Execution budget reached; retain partial work for review.'}]};
  busy=true;
  try{
@@ -41,9 +42,18 @@ server.setRequestHandler(CallToolRequestSchema,async request=>{
    const offset=Number.isInteger(a.offset)&&a.offset>=0?a.offset:0;
    return {content:[{type:'text',text:JSON.stringify({name:a.name,format:document.format,coverage:document.coverage,parts:document.parts,pages:document.pages,emptyPages:document.emptyPages,unreadMediaParts:document.unreadMediaParts,text:text.slice(offset,offset+24000),nextOffset:offset+24000<text.length?offset+24000:null,totalCharacters:text.length})}]};
   }
+  let r;
+  if(request.params.name==='create_text_pdf'){
+   if(typeof a.name!=='string'||! /^[\p{L}\p{N} _().-]{1,120}\.pdf$/u.test(a.name)||a.name.includes('..')||a.name.startsWith('.'))throw Error('Invalid PDF name');
+   const font=await readFile(new URL('./fonts/DejaVuSans.ttf',import.meta.url));
+   if(createHash('sha256').update(font).digest('hex')!=='7da195a74c55bef988d0d48f9508bd5d849425c1770dba5d7bfc6ce9ed848954')throw Error('Font integrity failed');
+   const bytes=createUnicodePdf(a.text,font);
+   r={type:'complete',exitCode:0,stdout:'',stderr:'',artifacts:[{name:a.name,base64:bytes.toString('base64')}]};
+  }else{
   if(typeof a.code!=='string')throw Error('Code required');
   if(Object.keys(a.files||{}).some(name=>Object.hasOwn(trustedFiles,name)))throw Error('Cannot overwrite supplied input');
-  const r=await executeCode({runtime:'quickjs',code:a.code,files:{...(a.files||{}),...trustedFiles},timeout:a.timeout||10});
+  r=await executeCode({runtime:'quickjs',code:a.code,files:{...(a.files||{}),...trustedFiles},timeout:a.timeout||10});
+  }
   const outputs=[],prepared=[];
   if(r.type==='complete'&&r.exitCode===0)for(const f of r.artifacts){
    const bytes=Buffer.from(f.base64,'base64');

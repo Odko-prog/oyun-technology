@@ -8,7 +8,7 @@
   },
   "scripts": {
     "start": "node server.mjs",
-    "test": "node --test test.mjs cloud-worker.test.mjs inputs.test.mjs context.test.mjs onboarding.test.mjs goals.test.mjs executor/read-document.test.mjs executor/read-pdf.test.mjs executor/read-spreadsheet.test.mjs executor/image-input.test.mjs executor/verify-office.test.mjs executor/verify-pdf.test.mjs device-protocol.test.mjs device-store.test.mjs local-agent/runner.test.mjs local-agent/connection.test.mjs device-tasks.test.mjs local-agent/collect-result.test.mjs local-agent/cli.test.mjs bataar-schedule.test.mjs bataar-worker.test.mjs bataar-messenger.test.mjs bataar-leads.test.mjs job-status.test.mjs"
+    "test": "node --test test.mjs cloud-worker.test.mjs inputs.test.mjs context.test.mjs onboarding.test.mjs goals.test.mjs executor/read-document.test.mjs executor/read-pdf.test.mjs executor/read-spreadsheet.test.mjs executor/image-input.test.mjs executor/verify-office.test.mjs executor/verify-pdf.test.mjs device-protocol.test.mjs device-store.test.mjs local-agent/runner.test.mjs local-agent/connection.test.mjs device-tasks.test.mjs local-agent/collect-result.test.mjs local-agent/cli.test.mjs bataar-schedule.test.mjs bataar-worker.test.mjs bataar-messenger.test.mjs bataar-leads.test.mjs job-status.test.mjs executor/unicode-pdf.test.mjs"
   },
   "dependencies": {
     "pg": "8.16.3",
@@ -20,3 +20,4 @@
     "yauzl": "3.4.0"
   }
 }
+
