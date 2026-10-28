@@ -2,6 +2,7 @@ import {readFile,readdir,lstat} from 'node:fs/promises';
 import {join} from 'node:path';
 import {createHash} from 'node:crypto';
 import {verifyOfficeOutput} from './verify-office.mjs';
+import {verifyPdfOutput} from './verify-pdf.mjs';
 export async function collectOutputs(dir,names){
  if(!Array.isArray(names)||names.length>8||new Set(names).size!==names.length)throw Error('Invalid exported names');
  const receipts=[];
@@ -21,8 +22,8 @@ export async function collectOutputs(dir,names){
   const bytes=await readFile(path);total+=bytes.length;
   if(total>10_000_000||bytes.length!==r.bytes||createHash('sha256').update(bytes).digest('hex')!==r.sha256)throw Error('Artifact integrity failed');
   const officeValidation=await verifyOfficeOutput(bytes,name);
-  out.push({name,mime:'application/octet-stream',bytes,sha256:r.sha256,...(officeValidation?{officeValidation}:{})});
+  const pdfValidation=await verifyPdfOutput(bytes,name);
+  out.push({name,mime:'application/octet-stream',bytes,sha256:r.sha256,...(officeValidation?{officeValidation}:{}),...(pdfValidation?{pdfValidation}:{})});
  }
  return out;
 }
-
