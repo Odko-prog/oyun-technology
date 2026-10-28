@@ -1,8 +1,14 @@
 {
-  "version": 1,
-  "sha256": "1e77f10b66616c6825c49d330e6c5035457ac0932a6999a22db55c4763080646",
-  "bytes": 5122,
+  "version": 2,
+  "optionalAttendedConnector": true,
+  "sha256": "4cdec2f906d1e0e632a718df3d3e2655bf39acda973bbbdd6e557fdd7c2f0929",
+  "bytes": 13642,
   "files": [
+    "agent/cli.mjs",
+    "agent/collect-result.mjs",
+    "agent/connection.mjs",
+    "agent/runner.mjs",
+    "CONNECT.cmd",
     "README-mn.txt",
     "START.cmd",
     "workspace/AGENTS.md",
