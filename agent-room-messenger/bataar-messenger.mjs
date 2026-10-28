@@ -27,7 +27,7 @@ export function withinReplyWindow(timestamp,now=Date.now()){
 export function validateMessengerDraft(draft){
   if(draft?.verified!==true||typeof draft.message!=='string'||draft.message.trim().length<10||draft.message.length>1500)throw Error('Unverified reply');
   if(/EAA[A-Za-z0-9]{40,}|sk-[A-Za-z0-9_-]{20,}/.test(draft.message))throw Error('Sensitive output');
-  return 'AI туслах: '+draft.message.replace(/^AI туслах[:：]?\s*/,'').trim();
+  return draft.message.replace(/^AI туслах[:：]?\s*/,'').trim();
 }
 export function messengerClient(env,fetcher=fetch){
   async function request(path,body){
@@ -49,7 +49,7 @@ export async function processBataarMessage(pool,event,{generate=generateBataar,s
   if(wantsHuman)await pool.query('INSERT INTO bataar_messenger_handoffs(sender_id) VALUES($1) ON CONFLICT DO NOTHING',[event.sender_id]);
   try{
     const history=(await pool.query("SELECT message_text,reply_text FROM bataar_messenger_requests WHERE page_id=$1 AND sender_id=$2 AND source_id<>$3 AND status='sent' ORDER BY created_at DESC LIMIT 8",[PAGE_ID,event.sender_id,event.source_id])).rows.reverse();
-    const message=wantsHuman?'AI туслах: Хүний ажилтантай холбогдох хүсэлтийг тэмдэглэлээ. Автомат хариуг энэ ярианд зогсоолоо. Баазтай 99530099 дугаараар холбогдоно уу.':validateMessengerDraft(await generate({kind:'messenger',message:event.message_text||'[Зөвхөн хавсралт ирсэн; агуулгыг нээгээгүй]',history},{env,signal}));
+    const message=wantsHuman?'Хүний ажилтантай холбогдох хүсэлтийг тэмдэглэлээ. Автомат хариуг энэ ярианд зогсоолоо. Баазтай 99530099 дугаараар холбогдоно уу.':validateMessengerDraft(await generate({kind:'messenger',message:event.message_text||'[Зөвхөн хавсралт ирсэн; агуулгыг нээгээгүй]',history},{env,signal}));
     if(signal?.aborted||!withinReplyWindow(event.source_timestamp))return finish('expired');
     await finish('dispatching',message); // An uncertain POST must never be automatically repeated.
     const id=await send(event,message);return finish('sent',message,id);
