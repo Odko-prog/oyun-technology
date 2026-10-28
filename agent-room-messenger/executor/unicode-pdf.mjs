@@ -2,6 +2,7 @@ import {trueTypeMetrics} from './truetype-metrics.mjs';
 // Plain BMP text only: no shaping, equations, tables, images or layout import.
 export function createUnicodePdf(text,fontBytes){
  if(typeof text!=='string'||!text.trim()||text.length>50000)throw Error('PDF text limit');
+ if(/[\p{M}\p{Script=Arabic}\p{Script=Hebrew}\u202a-\u202e\u2066-\u2069]/u.test(text))throw Error('PDF text requires unsupported shaping or bidirectional layout');
  text=text.replace(/\t/g,'    ');
  if(text.length>50000)throw Error('PDF text limit');
  const font=trueTypeMetrics(fontBytes),chars=[...new Set([...text].filter(c=>c!=='\n'&&c!=='\r'))];
