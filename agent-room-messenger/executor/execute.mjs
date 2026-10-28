@@ -3,7 +3,7 @@ import {readFile} from 'node:fs/promises';
 import {fileURLToPath} from 'node:url';
 const script=fileURLToPath(new URL('./execute-child.mjs',import.meta.url));
 export async function executeCode(input,{signal,rssLimitMiB=input.runtime==='quickjs'?192:320}={}){
- if(Buffer.byteLength(JSON.stringify(input))>2_000_000)throw Error('Input transport limit');
+ if(Buffer.byteLength(JSON.stringify(input))>15_000_000)throw Error('Input transport limit');
  return new Promise((resolve,reject)=>{
   const child=spawn(process.execPath,[`--max-old-space-size=${input.runtime==='quickjs'?96:192}`,script],{
    env:{PATH:process.env.PATH||'',LANG:'C.UTF-8'},stdio:['pipe','pipe','ignore'],signal});
