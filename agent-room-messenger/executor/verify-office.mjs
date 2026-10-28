@@ -4,7 +4,7 @@ import {posix} from 'node:path';
 const require=createRequire(import.meta.url),yauzl=require('yauzl'),{SaxesParser}=require('saxes');
 const relNS='http://schemas.openxmlformats.org/package/2006/relationships';
 const typeNS='http://schemas.openxmlformats.org/package/2006/content-types';
-const mainTypes={docx:'application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml',pptx:'application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml'};
+const mainTypes={docx:'application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml',pptx:'application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml',xlsx:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml'};
 
 function xmlTags(bytes){
  const text=new TextDecoder('utf-8',{fatal:true}).decode(bytes);
@@ -44,8 +44,11 @@ export async function verifyOfficeOutput(bytes,name){
  const mains=rootRels.filter(t=>t.uri===relNS&&t.name==='Relationship'&&/\/officeDocument$/.test(t.attrs.Type||'')&&t.attrs.TargetMode!=='External');
  if(mains.length!==1)throw Error('Office output main relationship missing');
  const target=mains[0].attrs.Target?.replace(/^\//,'');
- const expected=ext==='docx'?'word/document.xml':'ppt/presentation.xml';
- if(target!==expected||!entries.has(expected)||!types.some(t=>t.uri===typeNS&&t.name==='Override'&&t.attrs.PartName==='/'+expected&&t.attrs.ContentType===mainTypes[ext]))throw Error('Office output main part/type mismatch');
+ const expected=({docx:'word/document.xml',pptx:'ppt/presentation.xml',xlsx:'xl/workbook.xml'})[ext];
+ const overrides=types.filter(t=>t.uri===typeNS&&t.name==='Override'&&t.attrs.PartName==='/'+expected),defaults=types.filter(t=>t.uri===typeNS&&t.name==='Default'&&t.attrs.Extension==='xml');
+ if(overrides.length>1||defaults.length>1)throw Error('Office output ambiguous main content type');
+ const mainType=overrides[0]?.attrs.ContentType||defaults[0]?.attrs.ContentType;
+ if(target!==expected||!entries.has(expected)||mainType!==mainTypes[ext])throw Error('Office output main part/type mismatch');
  let externalRelationships=0;
  for(const [path,tags] of entries){if(!path.endsWith('.rels'))continue;
   if(tags?.[0]?.name!=='Relationships'||tags[0].uri!==relNS)throw Error('Office output invalid relationships');
@@ -61,8 +64,8 @@ export async function verifyOfficeOutput(bytes,name){
   }
  }
  const root=entries.get(expected)[0];
- const namespace=ext==='docx'?'wordprocessingml':'presentationml';
- if(root.name!==(ext==='docx'?'document':'presentation')||![`http://schemas.openxmlformats.org/${namespace}/2006/main`,`http://purl.oclc.org/ooxml/${namespace}/main`].includes(root.uri))throw Error('Office output invalid document root');
+ const namespace=({docx:'wordprocessingml',pptx:'presentationml',xlsx:'spreadsheetml'})[ext],rootName=({docx:'document',pptx:'presentation',xlsx:'workbook'})[ext];
+ if(root.name!==rootName||![`http://schemas.openxmlformats.org/${namespace}/2006/main`,`http://purl.oclc.org/ooxml/${namespace}/main`].includes(root.uri))throw Error('Office output invalid document root');
  return {format:ext,entries:entries.size,externalRelationships,structuralValidation:'passed',visualValidation:'not_performed',coverage:'ZIP CRC, bounded XML, package main content type and internal relationship targets checked. Rendering, visual layout and factual completeness not verified.'};
 }
 
