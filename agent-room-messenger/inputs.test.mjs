@@ -43,3 +43,9 @@ test('a stored file is reusable only through the matching sender query and valid
  assert.match(read.sql,/sender_id=\$2/);assert.deepEqual(read.args,['job-A','sender-A']);assert.equal(r.metadata[0].textPreview,'saved');
  assert.equal(inputMetadata({...f,bytes:Buffer.from([0,255])}).textPreview,null);
 });
+test('Office MIME types preserve parser-readable extensions rather than becoming generic binary names',async()=>{
+ for(const [suffix,ext] of [['wordprocessingml.document','docx'],['presentationml.presentation','pptx'],['spreadsheetml.sheet','xlsx']]){
+  const r=await prepareInputs({query:async()=>({rows:[]})},{id:'job-A',sender_id:'sender-A',attachment_refs:[{url:'https://x.fbcdn.net/a'}]},{download:async()=>({mime:'application/vnd.openxmlformats-officedocument.'+suffix,bytes:Buffer.from([80,75,0,255])})});assert.equal(r.metadata[0].name,'attachment-1.'+ext);assert.equal(r.metadata[0].textPreview,null);
+ }
+});
+
