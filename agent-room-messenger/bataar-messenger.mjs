@@ -1,8 +1,10 @@
+import {leadSchema,handleTravelLead} from './bataar-leads.mjs';
 import {extractEvents} from './core.mjs';
 import {PAGE_ID} from './bataar-schedule.mjs';
 import {generateBataar} from './bataar-worker.mjs';
 
 export async function bataarMessengerSchema(db){
+  await db.query(leadSchema);
   await db.query(`CREATE TABLE IF NOT EXISTS bataar_messenger_requests(
     source_id TEXT PRIMARY KEY,page_id TEXT NOT NULL CHECK(page_id='440088839501409'),sender_id TEXT NOT NULL,
     message_text TEXT NOT NULL,source_timestamp BIGINT,status TEXT NOT NULL DEFAULT 'received',
@@ -49,7 +51,8 @@ export async function processBataarMessage(pool,event,{generate=generateBataar,s
   if(wantsHuman)await pool.query('INSERT INTO bataar_messenger_handoffs(sender_id) VALUES($1) ON CONFLICT DO NOTHING',[event.sender_id]);
   try{
     const history=(await pool.query("SELECT message_text,reply_text FROM bataar_messenger_requests WHERE page_id=$1 AND sender_id=$2 AND source_id<>$3 AND status='sent' ORDER BY created_at DESC LIMIT 8",[PAGE_ID,event.sender_id,event.source_id])).rows.reverse();
-    const message=wantsHuman?'Хүний ажилтантай холбогдох хүсэлтийг тэмдэглэлээ. Автомат хариуг энэ ярианд зогсоолоо. Баазтай 99530099 дугаараар холбогдоно уу.':validateMessengerDraft(await generate({kind:'messenger',message:event.message_text||'[Зөвхөн хавсралт ирсэн; агуулгыг нээгээгүй]',history},{env,signal}));
+    const leadReply=wantsHuman?null:await handleTravelLead(pool,event);
+    const message=wantsHuman?'Хүний ажилтантай холбогдох хүсэлтийг тэмдэглэлээ. Автомат хариуг энэ ярианд зогсоолоо. Баазтай 99530099 дугаараар холбогдоно уу.':leadReply||validateMessengerDraft(await generate({kind:'messenger',message:event.message_text||'[Зөвхөн хавсралт ирсэн; агуулгыг нээгээгүй]',history},{env,signal}));
     if(signal?.aborted||!withinReplyWindow(event.source_timestamp))return finish('expired');
     await finish('dispatching',message); // An uncertain POST must never be automatically repeated.
     const id=await send(event,message);return finish('sent',message,id);

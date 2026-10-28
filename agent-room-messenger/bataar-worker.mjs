@@ -11,7 +11,7 @@ export async function generateBataar(input,{env=process.env,signal}={}){
   try{
     await writeFile(join(dir,'schema.json'),JSON.stringify(schema));
     const messenger=input.kind==='messenger';
-    const rules=await readFile(new URL(messenger?'./bataar-messenger-policy.txt':'./bataar-policy.txt',import.meta.url),'utf8');
+    const rules=await readFile(new URL(messenger?'./bataar-messenger-policy.txt':'./bataar-policy.txt',import.meta.url),'utf8')+(messenger?'\n'+await readFile(new URL('./bataar-knowledge.txt',import.meta.url),'utf8'):'');
     const args=['exec','--ignore-user-config','--ephemeral','--sandbox','read-only','--skip-git-repo-check','--disable','shell_tool','--disable','unified_exec','--disable','apps','--disable','browser_use','--disable','computer_use','--disable','multi_agent','--disable','skill_search','-c',(messenger?'web_search="disabled"':'web_search="live"'),'-c','cli_auth_credentials_store="file"','-C',dir,'--output-schema',join(dir,'schema.json'),'-o',join(dir,'draft.json'),'-'];
     await new Promise((ok,no)=>{
       const child=spawn(env.CODEX_BIN||resolve('node_modules/.bin/codex'),args,{env:childEnvironment(env),stdio:['pipe','ignore','pipe'],signal});
