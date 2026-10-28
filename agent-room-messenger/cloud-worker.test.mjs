@@ -87,6 +87,8 @@ test('invalid output and uncertain adapter failure stay isolated without deliver
  assert.equal(invalid.failureStage,'verification');assert.equal(invalid.generationFailed,false);assert.equal(sends,0);
  const uncertain=await processRequest(pool,async()=>{sends++;throw Error('uncertain');},job,async()=>({reply:'Done',status:'completed'}));
  assert.equal(uncertain.failureStage,'delivery');assert.equal(uncertain.review,true);assert.equal(uncertain.generationFailed,false);assert.equal(sends,1);
+ const badFile=await processRequest(pool,async()=>{sends++;},job,async()=>{const error=Error('Invalid generated Office package');error.code='AGENT_OUTPUT_INVALID';throw error;});
+ assert.equal(badFile.failureStage,'verification');assert.equal(badFile.generationFailed,false);assert.equal(sends,1);
 });
 test('disabled cloud worker cannot claim or send',async()=>{
  const worker=startCloudWorker({},()=>{throw Error('must not run');},{env:{CLOUD_WORKER_ENABLED:'false'}});
