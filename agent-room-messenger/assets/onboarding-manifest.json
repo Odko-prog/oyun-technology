@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "sha256": "1e77f10b66616c6825c49d330e6c5035457ac0932a6999a22db55c4763080646",
+  "bytes": 5122,
+  "files": [
+    "README-mn.txt",
+    "START.cmd",
+    "workspace/AGENTS.md",
+    "workspace/inputs/PLACE-FILES-HERE.txt",
+    "workspace/outputs/RESULTS-HERE.txt"
+  ],
+  "remoteConnectionCreated": false,
+  "credentialIncluded": false,
+  "startupEntryCreated": false
+}
