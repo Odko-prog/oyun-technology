@@ -57,11 +57,14 @@ export async function generateReply(input,{env=process.env,signal}={}){
 }
 
 export async function processRequest(pool,handle,job,generate=generateReply,options={}){
+ let failureStage='preparation';
  try{
   const devices=options.env?.DEVICE_BRIDGE_ENABLED==='true'?await activeCustomerDevices(pool,job.sender_id):[];
   const history=await conversationHistory(pool,job);
   const inputs=await prepareJobInputs(pool,job,options);
+  failureStage='generation';
   const generated=await generate({connected_devices:devices,history,text:job.device_pairing?'Компьютер холбох хүсэлт':job.message_text,device_pairing:job.device_pairing?{matched:true,state:'pending_owner'}:null,attachment_types:job.attachment_types,input_files:inputs.metadata,input_file_bytes:inputs.files,attachmentIssue:job.attachment_types?.length&&!inputs.metadata.length?'Attachment bytes unavailable; do not claim to inspect them':null},options);
+  failureStage='verification';
   const draft=validateReply(generated);
   await recordGoalStep(pool,job,{...draft,verification:generated.verification,continues_request_id:generated.continues_request_id});
   if(generated.device_task){if(options.env?.DEVICE_BRIDGE_ENABLED!=='true'||draft.status!=='awaiting_customer'||!devices.some(d=>d.id===generated.device_task.session_id))throw Error('Unverified device task');await enqueueDeviceTask(pool,job,generated.device_task);}
@@ -70,13 +73,16 @@ export async function processRequest(pool,handle,job,generate=generateReply,opti
    draft.reply=composeDelivery(draft.reply,links);
   }
   // The existing CAS/lease transition owns delivery. Never retry an uncertain send.
+  failureStage='delivery';
   const result=await handle('/operator/result','POST',{id:job.id,lease:job.lease,...draft},pool);
   await recordGoalDelivery(pool,job,result,draft.status).catch(()=>{console.error("Goal receipt reconciliation required");});
   if(result.sent){await handle('/operator/owner-notify','POST',{id:job.id},pool).catch(()=>{});}
   return {id:job.id,sent:result.sent===true,review:draft.status==='review'||result.needsReview===true||Boolean(result.error)};
  }catch{
   await pool.query("UPDATE messenger_requests SET status='review',lease_until=NULL WHERE id=$1 AND lease=$2 AND status='processing'",[job.id,job.lease]);
-  return {id:job.id,sent:false,review:true,generationFailed:true};
+  // A failed input or output remains held for review without stopping unrelated jobs.
+  // Actual model/auth/approval failures retain the existing worker circuit breaker.
+  return {id:job.id,sent:false,review:true,failureStage,generationFailed:failureStage==='generation'};
  }
 }
 
@@ -105,3 +111,4 @@ export function startCloudWorker(pool,handle,{env=process.env,generate=generateR
  })();
  return {state,done,async stop(){stopping=true;wake?.();abort.abort();await done;}};
 }
+
