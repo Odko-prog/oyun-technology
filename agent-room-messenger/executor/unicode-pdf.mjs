@@ -2,6 +2,8 @@ import {trueTypeMetrics} from './truetype-metrics.mjs';
 // Plain BMP text only: no shaping, equations, tables, images or layout import.
 export function createUnicodePdf(text,fontBytes){
  if(typeof text!=='string'||!text.trim()||text.length>50000)throw Error('PDF text limit');
+ text=text.replace(/\t/g,'    ');
+ if(text.length>50000)throw Error('PDF text limit');
  const font=trueTypeMetrics(fontBytes),chars=[...new Set([...text].filter(c=>c!=='\n'&&c!=='\r'))];
  if(chars.length>2000)throw Error('PDF character limit');
  const ids=new Map(chars.map((c,i)=>[c,i+1])),widths=chars.map(c=>Math.round(font.advance(c.codePointAt(0))));
@@ -30,6 +32,3 @@ export function createUnicodePdf(text,fontBytes){
  chunks.push(Buffer.from(`xref\n0 ${objects.length+1}\n0000000000 65535 f \n${offsets.slice(1).map(n=>String(n).padStart(10,'0')+' 00000 n \n').join('')}trailer\n<< /Size ${objects.length+1} /Root 1 0 R >>\nstartxref\n${offset}\n%%EOF\n`));
  return Buffer.concat(chunks);
 }
-
-
-

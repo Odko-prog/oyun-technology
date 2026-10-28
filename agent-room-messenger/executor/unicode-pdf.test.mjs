@@ -27,3 +27,8 @@ test('two-line paragraph starts on next page when only one line remains',async()
  const [one,two]=decoded.text.split('[PDF page 2]');
  assert.ok(!one.includes('Борлуулалтын'));assert.ok(two.includes('Борлуулалтын'));
 });
+test('pasted tabs normalize to spaces without losing Mongolian text',async()=>{
+ const decoded=await readPdf(createUnicodePdf('Нэр\tДүн\r\nМонгол\t1765',font));
+ assert.match(decoded.text,/Нэр\s+Дүн/);assert.match(decoded.text,/Монгол\s+1765/);
+ assert.throws(()=>createUnicodePdf('\t'.repeat(13000),font),/text limit/);
+});
