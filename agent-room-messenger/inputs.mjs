@@ -61,7 +61,7 @@ export async function prepareInputs(pool,job,{download=downloadAttachment,signal
   for(const [i,ref] of refs.entries()){
    if(boundedSignal.aborted)throw Error('Input preparation deadline');
    const f=await download(ref.url,{signal:boundedSignal});total+=f.bytes.length;if(total>10_000_000)throw Error('Input size limit');
-   const extension=({'text/csv':'csv','application/json':'json','application/pdf':'pdf','image/png':'png','image/jpeg':'jpg','text/plain':'txt'})[f.mime]||'bin';
+   const extension=({'text/csv':'csv','application/json':'json','application/pdf':'pdf','image/png':'png','image/jpeg':'jpg','text/plain':'txt','application/vnd.openxmlformats-officedocument.wordprocessingml.document':'docx','application/vnd.openxmlformats-officedocument.presentationml.presentation':'pptx','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet':'xlsx'})[f.mime]||'bin';
    downloaded.push({...f,name:`attachment-${i+1}.${extension}`,sha256:createHash('sha256').update(f.bytes).digest('hex')});
   }
   // One PostgreSQL statement persists the complete set and removes expiring URLs.
@@ -74,3 +74,4 @@ export async function prepareInputs(pool,job,{download=downloadAttachment,signal
  await pool.query('DELETE FROM messenger_inputs WHERE expires_at<NOW()');
  return {files:Object.fromEntries(files.map(f=>['/input/'+f.name,f.bytes.toString('base64')])),metadata:files.map(inputMetadata)};
 }
+
