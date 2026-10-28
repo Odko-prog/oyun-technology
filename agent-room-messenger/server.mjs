@@ -4,7 +4,8 @@ import {artifactSchema,serveArtifact} from './artifacts.mjs';
 import {inputSchema} from './inputs.mjs';
 import {randomUUID} from 'node:crypto';
 import pg from 'pg';
-import {sameSecret,validSignature,extractEvents} from './core.mjs';
+import {sameSecret,validSignature,extractEvents,extractOutgoingEvents} from './core.mjs';
+import {conversationSchema} from './context.mjs';
 import {operatorSchema,handleOperator,sendPage} from './operator.mjs';
 const PAGE=process.env.META_PAGE_ID||'1309261702280978';
 const pool=process.env.DATABASE_URL?new pg.Pool({connectionString:process.env.DATABASE_URL,max:3,connectionTimeoutMillis:5000,idleTimeoutMillis:10000}):null;
@@ -35,13 +36,13 @@ const server=http.createServer(async(req,res)=>{
    if(!ready||!process.env.META_APP_SECRET)return reply(res,503,{error:'Not configured'});
    if(Number(req.headers['content-length']||0)>65536)return reply(res,413,{error:'Payload too large'});
    const raw=await rawBody(req);if(!validSignature(raw,req.headers['x-hub-signature-256'],process.env.META_APP_SECRET))return reply(res,403,{error:'Signature rejected'});
-   let messages;try{messages=extractEvents(JSON.parse(raw.toString('utf8')),PAGE)}catch{return reply(res,400,{error:'Invalid event'})}
+   let messages,outgoing;try{const event=JSON.parse(raw.toString('utf8'));messages=extractEvents(event,PAGE);outgoing=extractOutgoingEvents(event,PAGE)}catch{return reply(res,400,{error:'Invalid event'})}
    const db=await pool.connect();try{await db.query('BEGIN');for(const m of messages){
     const id=randomUUID();const inserted=await db.query('INSERT INTO messenger_requests(id,source_id,sender_id,message_text,attachment_types,source_timestamp,attachment_refs) VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(source_id) DO NOTHING RETURNING id',[id,m.sourceId,m.senderId,m.text,JSON.stringify(m.attachments),m.timestamp,JSON.stringify(m.attachmentRefs)]);
     if(inserted.rowCount&&process.env.NOTIFICATION_EMAIL)await db.query("INSERT INTO messenger_notifications(id,request_id,event_type,recipient) VALUES($1,$2,'new_request',$3) ON CONFLICT DO NOTHING",[randomUUID(),id,process.env.NOTIFICATION_EMAIL]);
-   }await db.query('COMMIT')}catch{await db.query('ROLLBACK');throw Error('Storage unavailable')}finally{db.release()}
+   }for(const e of outgoing)await db.query('INSERT INTO messenger_outgoing_context(source_id,sender_id,message_text,attachment_types,source_timestamp) VALUES($1,$2,$3,$4,$5) ON CONFLICT(source_id) DO NOTHING',[e.sourceId,e.senderId,e.text,JSON.stringify(e.attachments),e.timestamp]);await db.query('COMMIT')}catch{await db.query('ROLLBACK');throw Error('Storage unavailable')}finally{db.release()}
    // Acknowledge only after durable commit. Notification rows do not mean an email was sent.
-   console.log(JSON.stringify({event:'webhook_committed',eventCount:messages.length}));
+   console.log(JSON.stringify({event:'webhook_committed',eventCount:messages.length,outgoingContextCount:outgoing.length}));
    return reply(res,200,{received:true});
   }
   if(req.method==='GET'&&url.pathname==='/operator/pending'){
@@ -53,6 +54,6 @@ const server=http.createServer(async(req,res)=>{
   return reply(res,404,{error:'Not found'});
  }catch(e){return reply(res,e.message==='TOO_LARGE'?413:503,{error:e.message==='TOO_LARGE'?'Payload too large':'Service unavailable'})}
 });
-for(let attempt=0;attempt<12&&!ready;attempt++){try{await initialize();if(ready){await operatorSchema(pool);await artifactSchema(pool);await inputSchema(pool);}}catch(error){ready=false;console.error(JSON.stringify({event:'database_initialization_unavailable',code:typeof error.code==='string'?error.code:'unknown',attempt:attempt+1}));await new Promise(resolve=>setTimeout(resolve,5000));}}if(!ready)process.exitCode=1;
+for(let attempt=0;attempt<12&&!ready;attempt++){try{await initialize();if(ready){await operatorSchema(pool);await artifactSchema(pool);await inputSchema(pool);await conversationSchema(pool);}}catch(error){ready=false;console.error(JSON.stringify({event:'database_initialization_unavailable',code:typeof error.code==='string'?error.code:'unknown',attempt:attempt+1}));await new Promise(resolve=>setTimeout(resolve,5000));}}if(!ready)process.exitCode=1;
 if(ready){cloudWorker=startCloudWorker(pool,handleOperator);server.listen(Number(process.env.PORT||10000),'0.0.0.0',()=>console.log('Messenger ingress listening'));}
 process.on('SIGTERM',async()=>{await cloudWorker?.stop();server.close(()=>pool?.end().finally(()=>process.exit(0)));});
