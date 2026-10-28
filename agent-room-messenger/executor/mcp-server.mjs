@@ -2,6 +2,7 @@ import {Server} from '@modelcontextprotocol/sdk/server/index.js';
 import {StdioServerTransport} from '@modelcontextprotocol/sdk/server/stdio.js';
 import {CallToolRequestSchema,ListToolsRequestSchema} from '@modelcontextprotocol/sdk/types.js';
 import {executeCode} from './execute.mjs';
+import {readDocument} from './read-document.mjs';
 import {writeFile,mkdir,readFile,lstat} from 'node:fs/promises';
 import {join,resolve} from 'node:path';
 import {createHash} from 'node:crypto';
@@ -23,7 +24,7 @@ const server=new Server({name:'agent-room-executor',version:'0.1.0'},{capabiliti
 server.setRequestHandler(ListToolsRequestSchema,async()=>({tools:[{
  name:'execute_code',description:'Execute general JavaScript in an isolated WASI virtual filesystem. Use for computation, data transformation and generating real files, not a task-specific workflow. No network, host files, Node.js, process or customer account access. QuickJS ES modules: import * as std from "std"; std.open(path,"w"), puts(), close(); /output exists. Read supplied input files under /input; write finished files under /output with safe flat names. Files are collected and verified as actual bytes. Research uses the separate live web tool. Each call starts fresh. Return exported filenames in the final response; do not invent files.',
  inputSchema:{type:'object',properties:{code:{type:'string',maxLength:200000},files:{type:'object',description:'Optional /input/name to base64 encoded input bytes',additionalProperties:{type:'string'}},timeout:{type:'number',minimum:1,maximum:20}},required:['code'],additionalProperties:false}
-},{name:'read_input',description:'Read an actually supplied UTF-8 text input in pages. Only this job files can be read. Returns actual text and nextOffset. Binary files require a parser; filenames alone do not prove their contents.',annotations:{readOnlyHint:true,destructiveHint:false,openWorldHint:false},inputSchema:{type:'object',properties:{name:{type:'string'},offset:{type:'integer',minimum:0}},required:['name'],additionalProperties:false}}]}));
+},{name:'read_input',description:'Read actual supplied UTF-8 text or extract bounded DOCX/PPTX text parts in pages. Only this job files can be read. Returns actual text, coverage and nextOffset. Continue paging when needed; returned text is not visual rendering. PDF/images/embedded objects/equations are not interpreted. Filenames alone do not prove contents.',annotations:{readOnlyHint:true,destructiveHint:false,openWorldHint:false},inputSchema:{type:'object',properties:{name:{type:'string'},offset:{type:'integer',minimum:0}},required:['name'],additionalProperties:false}}]}));
 server.setRequestHandler(CallToolRequestSchema,async request=>{
  if(!['execute_code','read_input'].includes(request.params.name))throw Error('Unknown tool');
  if(busy||++calls>12)return {isError:true,content:[{type:'text',text:'Execution budget reached; retain partial work for review.'}]};
@@ -33,10 +34,10 @@ server.setRequestHandler(CallToolRequestSchema,async request=>{
   if(request.params.name==='read_input'){
    const name='/input/'+a.name;if(!Object.hasOwn(trustedFiles,name))throw Error('Input not supplied');
    const bytes=Buffer.from(trustedFiles[name],'base64');
-   const text=new TextDecoder('utf-8',{fatal:true}).decode(bytes);
-   if(/[\x00-\x08\x0b\x0c\x0e-\x1f]/.test(text))throw Error('Binary input');
+   const document=await readDocument(bytes,a.name);
+   const text=document.text;
    const offset=Number.isInteger(a.offset)&&a.offset>=0?a.offset:0;
-   return {content:[{type:'text',text:JSON.stringify({name:a.name,text:text.slice(offset,offset+24000),nextOffset:offset+24000<text.length?offset+24000:null,totalCharacters:text.length})}]};
+   return {content:[{type:'text',text:JSON.stringify({name:a.name,format:document.format,coverage:document.coverage,parts:document.parts,unreadMediaParts:document.unreadMediaParts,text:text.slice(offset,offset+24000),nextOffset:offset+24000<text.length?offset+24000:null,totalCharacters:text.length})}]};
   }
   if(typeof a.code!=='string')throw Error('Code required');
   if(Object.keys(a.files||{}).some(name=>Object.hasOwn(trustedFiles,name)))throw Error('Cannot overwrite supplied input');
