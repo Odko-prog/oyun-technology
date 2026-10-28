@@ -13,7 +13,7 @@ test('model process never inherits operational credentials',()=>{
 const job={id:'job-1',sender_id:'sender-A',lease:'lease-1',created_at:'2026-10-27T00:00:00Z',message_text:'fixture',attachment_types:[]};
 test('history is scoped to sender, excludes current request and requires successful send',async()=>{
  let observed;
- const pool={async query(sql,args){observed={sql,args};return {rows:[]};}};
+ const pool={async query(sql,args){if(sql.includes('message_text AS customer'))observed={sql,args};return {rows:[]};}};
  const calls=[];const handle=async(route)=>{calls.push(route);return {sent:true};};
  const result=await processRequest(pool,handle,job,async()=>({reply:'Тест',status:'awaiting_customer'}));
  assert.match(observed.sql,/sender_id=\$1/);assert.match(observed.sql,/provider_id IS NOT NULL/);assert.equal(observed.args[0],'sender-A');
@@ -26,7 +26,7 @@ test('uncertain delivery is attempted once without retry or notification',async(
 test('model failure marks only matching processing lease for review without sending',async()=>{
  const queries=[];const pool={async query(sql,args){queries.push({sql,args});return {rows:[]};}};
  const result=await processRequest(pool,()=>{throw Error('must not send');},job,async()=>{throw Error('model failed');});
- assert.equal(result.review,true);assert.match(queries[1].sql,/status='processing'/);assert.deepEqual(queries[1].args,['job-1','lease-1']);
+ assert.equal(result.review,true);const review=queries.find(q=>q.sql.startsWith('UPDATE messenger_requests'));assert.match(review.sql,/status='processing'/);assert.deepEqual(review.args,['job-1','lease-1']);
 });
 test('disabled cloud worker cannot claim or send',async()=>{
  const worker=startCloudWorker({},()=>{throw Error('must not run');},{env:{CLOUD_WORKER_ENABLED:'false'}});
