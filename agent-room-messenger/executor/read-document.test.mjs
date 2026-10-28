@@ -25,3 +25,16 @@ test('wrong-format and corrupted CRC are rejected, normal text still reads',asyn
  await assert.rejects(readDocument(Buffer.from('%PDF\0binary'),'file.pdf'));
  const bad=zip([['word/document.xml',xml('text')]]);const cd=bad.indexOf(Buffer.from([0x50,0x4b,0x01,0x02]));bad.writeUInt32LE(1,cd+16);await assert.rejects(readDocument(bad,'bad.docx'),/CRC/);
 });
+test('bounded XLSX ZIP adapter resolves shared cell values and keeps cached formula provenance',async()=>{
+ const ns='http://schemas.openxmlformats.org/spreadsheetml/2006/main';
+ const r=await readDocument(zip([['xl/sharedStrings.xml',`<sst xmlns="${ns}"><si><t>warehouse-X9</t></si></sst>`],['xl/worksheets/sheet1.xml',`<worksheet xmlns="${ns}"><sheetData><row r="1"><c r="A1" t="s"><v>0</v></c><c r="B1"><v>35</v></c><c r="C1"><v>47</v></c><c r="D1"><f>B1*C1</f><v>1645</v></c></row></sheetData></worksheet>`]]),'fixture.xlsx');
+ assert.equal(r.format,'xlsx');assert.equal(r.cellCount,4);assert.match(r.text,/warehouse-X9/);assert.match(r.text,/1645/);assert.match(r.text,/B1\*C1/);assert.match(r.coverage,/NOT executed or recalculated/);
+});
+test('generic binary Office inputs infer one bounded package type and reject ambiguous containers',async()=>{
+ const word=zip([['word/document.xml',xml('actual generic binary Word text')]]);assert.equal((await readDocument(word,'attachment.bin')).format,'docx');
+ const ns='http://schemas.openxmlformats.org/spreadsheetml/2006/main';const sheet=`<worksheet xmlns="${ns}"><c r="A1"><v>1765</v></c></worksheet>`;
+ const xlsx=zip([['xl/workbook.xml',`<workbook xmlns="${ns}"/>`],['xl/worksheets/sheet1.xml',sheet]]);const r=await readDocument(xlsx,'attachment.bin');assert.equal(r.format,'xlsx');assert.match(r.text,/1765/);
+ await assert.rejects(readDocument(zip([['word/document.xml',xml('x')],['xl/workbook.xml','<workbook/>']]),'attachment.bin'),/ambiguous/);
+ await assert.rejects(readDocument(zip([['unrelated.txt','x']]),'attachment.bin'),/Unknown/);
+});
+
