@@ -13,7 +13,7 @@ export async function handleOperator(path,method,b,pool){
   // A crashed worker is held for review. Never blindly repeat an uncertain delivery.
   await pool.query("UPDATE messenger_requests SET status='review' WHERE status IN ('processing','dispatching') AND lease_until<NOW()");
   if(!process.env.PAGE_ACCESS_TOKEN)return {blocked:'Page sender not configured'};
-  const lease=randomUUID();const row=await pool.query("WITH next AS (SELECT id FROM messenger_requests WHERE status='received' ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT 1) UPDATE messenger_requests AS r SET status='processing',lease=$1,lease_until=NOW()+INTERVAL '10 minutes' FROM next WHERE r.id=next.id RETURNING r.id,r.sender_id,r.message_text,r.attachment_types,r.created_at,r.lease",[lease]);return {request:row.rows[0]||null};
+  const lease=randomUUID();const row=await pool.query("WITH next AS (SELECT id FROM messenger_requests WHERE status='received' ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT 1) UPDATE messenger_requests AS r SET status='processing',lease=$1,lease_until=NOW()+INTERVAL '10 minutes' FROM next WHERE r.id=next.id RETURNING r.id,r.sender_id,r.message_text,r.attachment_types,r.attachment_refs,r.created_at,r.lease",[lease]);return {request:row.rows[0]||null};
  }
  if(path==='/operator/result'&&method==='POST'){
   if(!uuid(b.id)||!uuid(b.lease)||typeof b.reply!=='string'||!b.reply.trim()||b.reply.length>1800||!['awaiting_customer','review','completed'].includes(b.status))return {error:'Invalid result'};
