@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {validateReply,childEnvironment,processRequest as actualProcessRequest,startCloudWorker,executorConfig} from './cloud-worker.mjs';
+import {validateReply,childEnvironment,processRequest as actualProcessRequest,startCloudWorker,executorConfig,generateReply} from './cloud-worker.mjs';
 import {createHash} from 'node:crypto';
 async function processRequest(pool, ...args){
  const wrapped={query:async(sql,params)=>{
@@ -89,6 +89,10 @@ test('invalid output and uncertain adapter failure stay isolated without deliver
  assert.equal(uncertain.failureStage,'delivery');assert.equal(uncertain.review,true);assert.equal(uncertain.generationFailed,false);assert.equal(sends,1);
  const badFile=await processRequest(pool,async()=>{sends++;},job,async()=>{const error=Error('Invalid generated Office package');error.code='AGENT_OUTPUT_INVALID';throw error;});
  assert.equal(badFile.failureStage,'verification');assert.equal(badFile.generationFailed,false);assert.equal(sends,1);
+ const badImage=await processRequest(pool,async()=>{sends++;},job,async()=>{const error=Error('Invalid image');error.code='AGENT_INPUT_INVALID';throw error;});assert.equal(badImage.failureStage,'preparation');assert.equal(badImage.generationFailed,false);assert.equal(sends,1);
+});
+test('invalid image is rejected before launching any model process',async()=>{
+ await assert.rejects(generateReply({input_files:[{name:'missing.png',mime:'image/png'}],input_file_bytes:{}},{env:{CODEX_BIN:'must-not-execute'}}),e=>e.code==='AGENT_INPUT_INVALID');
 });
 test('disabled cloud worker cannot claim or send',async()=>{
  const worker=startCloudWorker({},()=>{throw Error('must not run');},{env:{CLOUD_WORKER_ENABLED:'false'}});
