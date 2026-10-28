@@ -1,7 +1,7 @@
 // Trusted host adapter. Customer code receives only a WASI virtual filesystem.
 import {runFS} from '@runno/sandbox';
 let raw='';
-for await(const chunk of process.stdin){raw+=chunk;if(Buffer.byteLength(raw)>2_000_000)process.exit(2);}
+for await(const chunk of process.stdin){raw+=chunk;if(Buffer.byteLength(raw)>15_000_000)process.exit(2);}
 try {
  const {runtime,code,files,timeout}=JSON.parse(raw);
  if(!['python','quickjs'].includes(runtime)||typeof code!=='string'||code.length>200000)throw Error('Invalid program');
@@ -17,7 +17,7 @@ try {
   if(!path.startsWith('/output/'))continue;
   const name=path.slice(8);
   if(name==='.runno')continue; // WASI virtual directory marker, not a deliverable.
-  if(!/^[\p{L}\p{N} _().-]{1,120}$/u.test(name)||name.includes('..'))throw Error('Invalid output name');
+  if(!/^[\p{L}\p{N} _().-]{1,120}$/u.test(name)||name.startsWith('.')||name.includes('..'))throw Error('Invalid output name');
   const b=Buffer.from(f.content);total+=b.length;
   if(b.length>5_000_000||total>10_000_000||artifacts.length>=8)throw Error('Output transport limit');
   artifacts.push({name,base64:b.toString('base64')});
