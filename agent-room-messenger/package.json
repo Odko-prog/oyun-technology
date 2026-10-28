@@ -8,12 +8,14 @@
   },
   "scripts": {
     "start": "node server.mjs",
-    "test": "node --test test.mjs cloud-worker.test.mjs inputs.test.mjs context.test.mjs onboarding.test.mjs goals.test.mjs"
+    "test": "node --test test.mjs cloud-worker.test.mjs inputs.test.mjs context.test.mjs onboarding.test.mjs goals.test.mjs executor/read-document.test.mjs"
   },
   "dependencies": {
     "pg": "8.16.3",
     "@openai/codex": "0.164.0",
     "@runno/sandbox": "0.10.2",
-    "@modelcontextprotocol/sdk": "1.32.2"
+    "@modelcontextprotocol/sdk": "1.32.2",
+    "saxes": "6.0.0",
+    "yauzl": "3.4.0"
   }
 }
