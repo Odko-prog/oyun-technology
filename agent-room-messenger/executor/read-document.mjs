@@ -1,5 +1,6 @@
 import {createRequire} from 'node:module';
 import {crc32} from 'node:zlib';
+import {readPdf} from './read-pdf.mjs';
 const require=createRequire(import.meta.url);
 const yauzl=require('yauzl');
 const {SaxesParser}=require('saxes');
@@ -40,6 +41,7 @@ export function documentXmlText(bytes){
 export async function readDocument(bytes,name){
  if(!Buffer.isBuffer(bytes)||bytes.length>5_000_000)throw Error('Input size limit');
  const ext=name.toLowerCase().split('.').pop();
+ if(ext==='pdf')return readPdf(bytes);
  if(!['docx','pptx'].includes(ext)){
   const text=new TextDecoder('utf-8',{fatal:true}).decode(bytes);
   if(/[\x00-\x08\x0b\x0c\x0e-\x1f]/.test(text))throw Error('Unsupported binary input');
@@ -76,3 +78,4 @@ export async function readDocument(bytes,name){
  parts.sort((a,b)=>a.name.localeCompare(b.name,'en',{numeric:true}));
  return {format:ext,text:parts.map(p=>`[Package part: ${p.name}]\n${p.text}`).join('\n\n'),parts:parts.map(p=>p.name),unreadMediaParts:media,coverage:'Extracted text parts only. Images, charts, equations, embedded objects and visual layout were not interpreted. Package part names are labels, not verified presentation order.'};
 }
+
