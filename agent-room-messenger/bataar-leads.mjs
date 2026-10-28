@@ -11,9 +11,9 @@ export function leadStep(previous,text){
  const raw=String(text||'').trim(),t=raw.toLowerCase().replace(/[.!?]+$/,'').trim();
  const state=previous?{stage:previous.stage,data:{...previous.data}}:null;
  if(!state&&!start.test(t))return null;
- if(!state)return {stage:'consent',data:{},reply:'Аяллын хүсэлт бүртгүүлэх үү? Хугацаа, хүний тоо, аяллын чиглэл, хүсвэл утсыг тань энэ чат болон баазын Render серверт хадгалж, баазын эрхтэй ажилтан үзнэ. Энэ нь захиалга баталсан гэсэн үг биш. Зөвшөөрвөл “Тийм”, хүсэхгүй бол “Үгүй” гэж бичнэ үү. Нууцлал: '+privacy};
+ if(!state)return {stage:'consent',data:/туршилт|test/i.test(raw)?{isTest:true}:{},reply:'Аяллын хүсэлт бүртгүүлэх үү? Хугацаа, хүний тоо, аяллын чиглэл, хүсвэл утсыг тань энэ чат болон баазын Render серверт хадгалж, баазын эрхтэй ажилтан үзнэ. Энэ нь захиалга баталсан гэсэн үг биш. Зөвшөөрвөл “Тийм”, хүсэхгүй бол “Үгүй” гэж бичнэ үү. Нууцлал: '+privacy};
  if(no.test(t)&&state.stage!=='pending-staff')return {stage:'cancelled',data:{},reply:'Хүсэлт бүртгэхийг цуцаллаа. Аяллын ерөнхий асуултаа асууж болно.'};
- if(state.stage==='consent')return yes.test(t)?{stage:'dates',data:{consentedAt:new Date().toISOString()},reply:'Хэзээ ирэхээр төлөвлөж байна вэ? Жишээ нь 2026-12-10–2026-12-15. Огноо тодорхойгүй бол “Тодорхойгүй” гэж бичиж болно.'}:{...state,reply:'Мэдээллээ бүртгүүлэхийг зөвшөөрвөл “Тийм”, хүсэхгүй бол “Үгүй” гэж бичнэ үү.'};
+ if(state.stage==='consent')return yes.test(t)?{stage:'dates',data:{...state.data,consentedAt:new Date().toISOString()},reply:'Хэзээ ирэхээр төлөвлөж байна вэ? Жишээ нь 2026-12-10–2026-12-15. Огноо тодорхойгүй бол “Тодорхойгүй” гэж бичиж болно.'}:{...state,reply:'Мэдээллээ бүртгүүлэхийг зөвшөөрвөл “Тийм”, хүсэхгүй бол “Үгүй” гэж бичнэ үү.'};
  if(state.stage==='dates'){
    if(!raw||raw.length>120)return {...state,reply:'Ирэх, буцах огноо эсвэл ойролцоох сар/хугацааг 120 тэмдэгтэд багтаан бичнэ үү.'};
    return {stage:'people',data:{...state.data,dates:raw},reply:'Нийт хэдэн хүн аялах вэ? Зөвхөн тоогоор бичнэ үү. Хүүхдийн нэр, нас зэрэг хувийн мэдээлэл хэрэггүй.'};
@@ -41,5 +41,5 @@ export async function handleTravelLead(db,event){
  const id=old?.id||'BT-'+createHash('sha256').update(event.source_id).digest('hex').slice(0,10).toUpperCase();
  await db.query(`INSERT INTO bataar_travel_leads(id,page_id,sender_id,stage,data) VALUES($1,$2,$3,$4,$5)
  ON CONFLICT(id) DO UPDATE SET stage=EXCLUDED.stage,data=EXCLUDED.data,updated_at=NOW()`,[id,event.page_id,event.sender_id,next.stage,JSON.stringify(next.data)]);
- return next.reply+(next.stage==='pending-staff'?'\nХүсэлтийн дугаар: '+id:'');
+ return next.reply+(next.stage==='pending-staff'?'\n'+(next.data.isTest?'ТУРШИЛТ — бодит аяллын хүсэлт биш.\n':'')+'Хүсэлтийн дугаар: '+id:'');
 }

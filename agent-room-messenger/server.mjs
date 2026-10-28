@@ -70,7 +70,7 @@ const server=http.createServer(async(req,res)=>{
   if(req.method==='GET'&&url.pathname==='/operator/bataar/leads'){
    if(!process.env.OPERATOR_TOKEN||!sameSecret(req.headers.authorization,'Bearer '+process.env.OPERATOR_TOKEN))return reply(res,401,{error:'Unauthorized'});
    if(!ready)return reply(res,503,{error:'Storage unavailable'});
-   const leads=await pool.query("SELECT id,sender_id,stage,data,created_at,updated_at FROM bataar_travel_leads WHERE page_id='440088839501409' AND stage='pending-staff' ORDER BY created_at DESC LIMIT 100");return reply(res,200,{leads:leads.rows});
+   const leads=await pool.query("SELECT id,sender_id,stage,data,created_at,updated_at FROM bataar_travel_leads WHERE page_id='440088839501409' AND stage='pending-staff' AND COALESCE(data->>'isTest','false')<>'true' ORDER BY created_at DESC LIMIT 100");return reply(res,200,{leads:leads.rows});
   }
   if(req.method==='GET'&&url.pathname==='/operator/pending'){
    if(!process.env.OPERATOR_TOKEN||!sameSecret(req.headers.authorization,'Bearer '+process.env.OPERATOR_TOKEN))return reply(res,401,{error:'Unauthorized'});
