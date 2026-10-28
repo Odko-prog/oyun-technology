@@ -6,7 +6,7 @@ export function presentJobStatus(request) {
   if (state === 'processing') return {state:'running',label:'Ажлыг гүйцэтгэж байна',terminal:false};
   if (state === 'received' || state === 'pending' || state === 'queued') return {state:'queued',label:'Ажил дараалалд байна',terminal:false};
   if (state === 'awaiting_customer') return {state:'awaiting_customer',label:'Таны нэмэлт мэдээлэл эсвэл зөвшөөрөл хэрэгтэй',terminal:false};
-  if (state === 'completed' && request.provider_id) return {state:'completed',label:'Үр дүнг илгээсэн',terminal:true};
+  if (state === 'completed' && typeof request.provider_id === 'string' && request.provider_id.trim().length > 0) return {state:'completed',label:'Үр дүнг илгээсэн',terminal:true};
   // A database completion without a provider receipt must not imply delivery.
   return {state:'review',label:'Ажлын төлөвийг шалгах шаардлагатай',terminal:false};
 }
@@ -27,3 +27,4 @@ export async function priorJobStatuses(pool,job) {
   const result=await pool.query('SELECT id,status,provider_id FROM messenger_requests WHERE sender_id=$1 AND id<>$2 AND created_at<$3 ORDER BY created_at DESC LIMIT 8',[job.sender_id,job.id,job.created_at]);
   return result.rows.map(row=>({request_id:row.id,...presentJobStatus(row)}));
 }
+

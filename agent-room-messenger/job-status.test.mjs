@@ -40,3 +40,6 @@ test('presentation returns only allowlisted public status fields',()=>{
   assert.deepEqual(Object.keys(result),['state','label','terminal']);
   assert.equal(result.state,'running');
 });
+test('malformed or blank provider receipt never implies delivery',()=>{
+ for(const provider_id of ['', '   ', true, 123, {}, []])assert.equal(presentJobStatus({status:'completed',provider_id}).state,'review');
+});
