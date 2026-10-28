@@ -62,3 +62,11 @@ test('executor uses actual automatic review and scoped output directory',()=>{
  assert.ok(c.some(x=>x.includes('agent-room-fixture')&&x.includes('outputs')));
  assert.ok(!c.some(x=>/danger-full-access|bypass|approval_policy="never"/.test(x)));
 });
+test('attachment bytes reach only this job while signed CDN URLs stay out of model input',async()=>{
+ const attached={...job,attachment_types:['file'],attachment_refs:[{type:'file',url:'https://x.fbcdn.net/private?synthetic=secret'}]};
+ const pool={query:async()=>({rows:[]})};let observed;
+ const result=await processRequest(pool,async()=>({sent:true}),attached,async input=>{observed=input;return {reply:'Processed supplied input',status:'completed'};},{download:async()=>({mime:'text/csv',bytes:Buffer.from('item,qty\napples,7')})});
+ assert.equal(result.sent,true);assert.ok(observed.input_file_bytes['/input/attachment-1.csv']);
+ assert.equal(observed.input_files[0].textPreview,'item,qty\napples,7');
+ assert.ok(!JSON.stringify(observed).includes('fbcdn.net'));assert.ok(!JSON.stringify(observed).includes('synthetic=secret'));
+});
