@@ -47,12 +47,14 @@ export async function generateReply(input,{env=process.env,signal}={}){
    child.once('close',code=>{clearTimeout(timer);clearTimeout(killTimer);code===0?ok():no(Error('AI execution failed'));});
    child.stdin.on('error',()=>{});child.stdin.end(prompt);
   });
+  try{
   const value=JSON.parse(await readFile(output,'utf8'));
   const draft=validateReply(value);
   if(!execution)return draft;
   if(typeof value.verification!=='string'||!value.verification.trim())throw Error('Missing verification');
   const files=await collectOutputs(join(dir,'outputs'),value.artifacts);
   return {...draft,artifacts:files,verification:value.verification,continues_request_id:value.continues_request_id,device_task:value.device_task};
+  }catch{const error=Error('Generated output requires review');error.code='AGENT_OUTPUT_INVALID';throw error;}
  }finally{await rm(dir,{recursive:true,force:true});}
 }
 
@@ -78,7 +80,8 @@ export async function processRequest(pool,handle,job,generate=generateReply,opti
   await recordGoalDelivery(pool,job,result,draft.status).catch(()=>{console.error("Goal receipt reconciliation required");});
   if(result.sent){await handle('/operator/owner-notify','POST',{id:job.id},pool).catch(()=>{});}
   return {id:job.id,sent:result.sent===true,review:draft.status==='review'||result.needsReview===true||Boolean(result.error)};
- }catch{
+ }catch(error){
+  if(failureStage==='generation'&&error?.code==='AGENT_OUTPUT_INVALID')failureStage='verification';
   await pool.query("UPDATE messenger_requests SET status='review',lease_until=NULL WHERE id=$1 AND lease=$2 AND status='processing'",[job.id,job.lease]);
   // A failed input or output remains held for review without stopping unrelated jobs.
   // Actual model/auth/approval failures retain the existing worker circuit breaker.
