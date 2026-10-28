@@ -149,3 +149,16 @@ test('attachment bytes reach only this job while signed CDN URLs stay out of mod
  assert.equal(observed.input_files[0].textPreview,'item,qty\napples,7');
  assert.ok(!JSON.stringify(observed).includes('fbcdn.net'));assert.ok(!JSON.stringify(observed).includes('synthetic=secret'));
 });
+
+test('model receives own prior status without provider receipt or private body',async()=>{
+ let observed;
+ const pool={query:async sql=>({rows:sql.startsWith('SELECT id,status,provider_id')?[{id:'prior',status:'processing',provider_id:null,message_text:'private'}]:[]})};
+ await processRequest(pool,async()=>({sent:true}),job,async input=>{observed=input;return {reply:'Тест',status:'awaiting_customer'};});
+ assert.deepEqual(observed.prior_statuses,[{request_id:'prior',state:'running',label:'Ажлыг гүйцэтгэж байна',terminal:false}]);
+});
+test('status storage failure holds preparation for review without generation or send',async()=>{
+ let generated=0,sent=0;
+ const pool={query:async sql=>{if(sql.startsWith('SELECT id,status,provider_id'))throw Error('storage');return {rows:[]};}};
+ const result=await processRequest(pool,async()=>{sent++;},job,async()=>{generated++;});
+ assert.equal(result.failureStage,'preparation');assert.equal(result.review,true);assert.equal(generated,0);assert.equal(sent,0);
+});
