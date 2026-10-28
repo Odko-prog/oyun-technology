@@ -53,7 +53,40 @@ test('uncertain delivery is attempted once without retry or notification',async(
 test('model failure marks only matching processing lease for review without sending',async()=>{
  const queries=[];const pool={async query(sql,args){queries.push({sql,args});return {rows:[]};}};
  const result=await processRequest(pool,()=>{throw Error('must not send');},job,async()=>{throw Error('model failed');});
- assert.equal(result.review,true);const review=queries.find(q=>q.sql.startsWith('UPDATE messenger_requests'));assert.match(review.sql,/status='processing'/);assert.deepEqual(review.args,['job-1','lease-1']);
+ assert.equal(result.review,true);assert.equal(result.generationFailed,true);assert.equal(result.failureStage,'generation');const review=queries.find(q=>q.sql.startsWith('UPDATE messenger_requests'));assert.match(review.sql,/status='processing'/);assert.deepEqual(review.args,['job-1','lease-1']);
+});
+
+test('corrupt prior input does not stop the worker from delivering the next customer job',async()=>{
+ const {mkdtemp,writeFile,rm}=await import('node:fs/promises');
+ const {tmpdir}=await import('node:os');const {join}=await import('node:path');
+ const dir=await mkdtemp(join(tmpdir(),'agent-room-worker-test-'));
+ let worker,claims=0,generated=0;const delivered=[],reviewed=[];
+ try{
+  await writeFile(join(dir,'auth.json'),'{}'); // Access fixture only; no real account/model.
+  const pool={async query(sql,args){
+   if(sql.includes('INSERT INTO messenger_goal_steps'))return {rows:[{goal_id:args[0]}]};
+   if(sql.startsWith('UPDATE messenger_requests'))reviewed.push(args[0]);
+   if(sql.startsWith('SELECT a.name')&&sql.includes('FROM messenger_artifacts')&&args[1]==='bad-input')return {rows:[{name:'old.txt',mime:'text/plain',bytes:Buffer.from('tampered'),sha256:'0'.repeat(64)}]};
+   return {rows:[]};
+  },async connect(){return {query:async()=>({rows:[{acquired:true}]}),release(){}};}};
+  const handle=async route=>{
+   if(route==='/operator/claim'){claims++;return claims<=2?{request:{...job,id:claims===1?'bad-input':'next-job'}}:{};}
+   if(route==='/operator/result'){delivered.push('next-job');return {sent:true};}
+   return {};
+  };
+  worker=startCloudWorker(pool,handle,{env:{CLOUD_WORKER_ENABLED:'true',CODEX_HOME:dir},generate:async()=>{generated++;return {reply:'Verified text',status:'completed'};}});
+  const deadline=Date.now()+3000;
+  while(claims<3&&Date.now()<deadline)await new Promise(r=>setTimeout(r,10));
+  assert.ok(claims>=3);assert.deepEqual(reviewed,['bad-input']);assert.equal(generated,1);assert.deepEqual(delivered,['next-job']);assert.equal(worker.state.lastResult.sent,true);
+ }finally{await worker?.stop();await rm(dir,{recursive:true,force:true});}
+});
+
+test('invalid output and uncertain adapter failure stay isolated without delivery retry',async()=>{
+ let sends=0;const pool={query:async()=>({rows:[]})};
+ const invalid=await processRequest(pool,async()=>{sends++;},job,async()=>({reply:'',status:'completed'}));
+ assert.equal(invalid.failureStage,'verification');assert.equal(invalid.generationFailed,false);assert.equal(sends,0);
+ const uncertain=await processRequest(pool,async()=>{sends++;throw Error('uncertain');},job,async()=>({reply:'Done',status:'completed'}));
+ assert.equal(uncertain.failureStage,'delivery');assert.equal(uncertain.review,true);assert.equal(uncertain.generationFailed,false);assert.equal(sends,1);
 });
 test('disabled cloud worker cannot claim or send',async()=>{
  const worker=startCloudWorker({},()=>{throw Error('must not run');},{env:{CLOUD_WORKER_ENABLED:'false'}});
@@ -97,3 +130,4 @@ test('attachment bytes reach only this job while signed CDN URLs stay out of mod
  assert.equal(observed.input_files[0].textPreview,'item,qty\napples,7');
  assert.ok(!JSON.stringify(observed).includes('fbcdn.net'));assert.ok(!JSON.stringify(observed).includes('synthetic=secret'));
 });
+
