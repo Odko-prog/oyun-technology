@@ -1,0 +1,19 @@
+import {readFileSync} from 'node:fs';
+import {createHash} from 'node:crypto';
+
+export function onboardingAssets(directory=new URL('./assets/',import.meta.url)) {
+  const manifest=JSON.parse(readFileSync(new URL('onboarding-manifest.json',directory),'utf8'));
+  const zip=Buffer.from(readFileSync(new URL('agent-room-local-agent.zip.b64',directory),'utf8').trim(),'base64');
+  if(zip.length!==manifest.bytes||createHash('sha256').update(zip).digest('hex')!==manifest.sha256)throw Error('Onboarding package integrity mismatch');
+  return {manifest,zip};
+}
+export function onboardingPage(manifest){
+  if(!/^[a-f0-9]{64}$/.test(manifest.sha256))throw Error('Invalid checksum');
+  return `<!doctype html><html lang="mn"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Өөрийн компьютерийн AI агент — Агентуудын өрөө</title><style>body{font:18px/1.6 system-ui;max-width:800px;margin:40px auto;padding:0 22px;color:#152936;background:#f4f7fa}h1{line-height:1.2}a{color:#00647c}code{overflow-wrap:anywhere}section{padding:20px;background:white;border-radius:16px;margin:20px 0}.button{display:inline-block;padding:12px 20px;background:#00647c;color:white;border-radius:10px}</style><h1>Өөрийн компьютер дээр ажиллах AI агент</h1><p>Агентуудын өрөө · Windows · Бэлтгэл багц</p><section><h2>Эзний өөрийн Codex эрхээр ажиллана</h2><p>Файлтай ажиллах, код бичих, судлах, үр дүнгээ шалгах ажлыг өөрийн сонгосон ажлын хавтсанд даалгана. Багцад Codex програм, үйлчилгээний нууц түлхүүр, бусдын бүртгэл ороогүй.</p><a class="button" href="/downloads/agent-room-local-agent.zip">Бэлтгэл багц татах · ${manifest.bytes} байт</a></section><section><h2>Эхлүүлэх дараалал</h2><ol><li>ZIP-ийг өөрийн компьютерийн сонгосон хавтсанд бүрэн задлана.</li><li>Codex CLI байхгүй бол <a href="https://learn.chatgpt.com/docs/cli">албан ёсны заавраар</a> суулгана.</li><li>START.cmd-ийг өөрөө ажиллуулж, эхлүүлэхийг батална. Шаардлагатай бол өөрийн ChatGPT бүртгэлээр албан ёсны хуудсанд нэвтэрнэ.</li><li>Файлаа workspace/inputs-д байрлуулж, агентад зорилгоо хэлнэ. Гарах үр дүн workspace/outputs-д байна.</li></ol><p>Ердийн CLI горим ажлын хавтас бичих sandbox, шаардлагатай үйлдэлд зөвшөөрөл авах тохиргоотой. Desktop горим сонговол өөрийн аппын эрхийн тохиргоог шалгана. Таны багцын хэрэглээ, лимит үйлчилнэ.</p></section><section><h2>Холболт ба зогсоох</h2><p>Энэ таталт Messenger-тэй төхөөрөмжийг холбохгүй, алсын хандалт нээхгүй, автоматаар асах үйлчилгээ суулгахгүй. Бусдын компьютерт ажиллахын өмнө тухайн эзэн холболт, ажлын хүрээ, зогсоох аргыг өөрөө батална.</p><p>CLI ажлыг Esc эсвэл Ctrl+C, Desktop ажлыг Stop-оор зогсооно. Өөрөө эхлүүлсэн бусад програм, ажлыг тусад нь шалгана. Нууц үг, OTP, API түлхүүрийг Page рүү бүү илгээ.</p></section><p>SHA-256: <code>${manifest.sha256}</code></p><p><a href="https://www.facebook.com/profile.php?id=61595841421312">Агентуудын өрөө Page</a> · <a href="/privacy">Нууцлал</a></p></html>`;
+}
+export function serveOnboarding(path,res,assets){
+  if(!['/device-onboarding','/downloads/agent-room-local-agent.zip'].includes(path))return false;
+  const download=path.endsWith('.zip');
+  res.writeHead(200,{'Content-Type':download?'application/zip':'text/html; charset=utf-8','Cache-Control':'public, max-age=300','X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer','Content-Security-Policy':"default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'",...(download?{'Content-Disposition':'attachment; filename="agent-room-local-agent.zip"','Content-Length':assets.zip.length}:{})});
+  res.end(download?assets.zip:onboardingPage(assets.manifest));return true;
+}
