@@ -44,7 +44,11 @@ export async function runSlot({pool,now=new Date(),startAt,generate,verifyIdenti
     if(typeof id!=='string'||!id.startsWith(PAGE_ID+'_'))throw Error('Publication outcome uncertain');
     await pool.query("UPDATE bataar_publication_slots SET status='published',provider_id=$2,updated_at=NOW() WHERE slot=$1",[slot,id]);
     return {status:'published',slot,id};
-  }catch{
+  }catch(error){
+    if(stage==='preparation'&&error?.code==='SLOT_RESERVED'){
+      await pool.query("UPDATE bataar_publication_slots SET status='skipped',updated_at=NOW() WHERE slot=$1",[slot]);
+      return {status:'skipped',slot};
+    }
     await pool.query("UPDATE bataar_publication_slots SET status='review',updated_at=NOW() WHERE slot=$1",[slot]);
     return {status:'review',slot,stage};
   }
