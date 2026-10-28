@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {validateReply,childEnvironment,processRequest as actualProcessRequest,startCloudWorker,executorConfig,generateReply} from './cloud-worker.mjs';
+import {validateReply,childEnvironment,processRequest as actualProcessRequest,startCloudWorker,executorConfig,generateReply,failureMetadata} from './cloud-worker.mjs';
 import {createHash} from 'node:crypto';
 async function processRequest(pool, ...args){
  const wrapped={query:async(sql,params)=>{
@@ -50,6 +50,19 @@ test('uncertain delivery is attempted once without retry or notification',async(
  const calls=[];const result=await processRequest({query:async()=>({rows:[]})},async(route)=>{calls.push(route);return {sent:false,needsReview:true};},job,async()=>({reply:'Тест',status:'review'}));
  assert.equal(result.review,true);assert.deepEqual(calls,['/operator/result']);
 });
+test('failure metadata never exposes exception text or untrusted codes and preserves bounded exit facts',()=>{
+ const secret='private customer text token=https://secret.invalid';
+ assert.deepEqual(failureMetadata({code:secret,message:secret,stderr:secret}),{failureCode:'UNCLASSIFIED'});
+ assert.deepEqual(failureMetadata({code:'AI_PROCESS_EXIT',exitCode:137,exitSignal:'SIGKILL',message:secret}),{failureCode:'AI_PROCESS_EXIT',exitCode:137,exitSignal:'SIGKILL'});
+ assert.deepEqual(failureMetadata({code:'AI_PROCESS_EXIT',exitCode:999,exitSignal:secret}),{failureCode:'AI_PROCESS_EXIT'});
+});
+
+test('typed model timeout stays held for review without a send or circuit-breaker downgrade',async()=>{
+ let sends=0;
+ const result=await processRequest({query:async()=>({rows:[]})},async()=>{sends++;},job,async()=>{throw Object.assign(Error('private details'),{code:'AI_TIMEOUT'});});
+ assert.equal(result.failureCode,'AI_TIMEOUT');assert.equal(result.generationFailed,true);assert.equal(result.review,true);assert.equal(sends,0);assert.ok(!JSON.stringify(result).includes('private details'));
+});
+
 test('model failure marks only matching processing lease for review without sending',async()=>{
  const queries=[];const pool={async query(sql,args){queries.push({sql,args});return {rows:[]};}};
  const result=await processRequest(pool,()=>{throw Error('must not send');},job,async()=>{throw Error('model failed');});
@@ -136,4 +149,3 @@ test('attachment bytes reach only this job while signed CDN URLs stay out of mod
  assert.equal(observed.input_files[0].textPreview,'item,qty\napples,7');
  assert.ok(!JSON.stringify(observed).includes('fbcdn.net'));assert.ok(!JSON.stringify(observed).includes('synthetic=secret'));
 });
-
