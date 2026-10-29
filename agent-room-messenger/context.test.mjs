@@ -35,3 +35,13 @@ test('history includes scoped Page replies and deduplicates API echo receipts',a
  assert.match(query.sql,/e.sender_id=\$1/);assert.match(query.sql,/r.sender_id=\$1 AND r.provider_id=e.source_id/);
  assert.match(query.sql,/UNION ALL/);assert.match(query.sql,/NOT EXISTS/);
 });
+
+test('history keeps unanswered customer facts without treating unsent drafts as delivered replies',async()=>{
+ let query;
+ await conversationHistory({query:async(sql,args)=>{query={sql,args};return {rows:[]};}},job);
+ const inbound=query.sql.split('UNION ALL')[0];
+ assert.match(inbound,/sender_id=\$1 AND id<>\$2 AND created_at<\$3/);
+ assert.doesNotMatch(inbound,/created_at<\$3 AND provider_id IS NOT NULL/);
+ assert.match(inbound,/CASE WHEN provider_id IS NOT NULL THEN reply_text ELSE NULL END AS assistant/);
+ assert.deepEqual(query.args,[job.sender_id,job.id,job.created_at]);
+});
