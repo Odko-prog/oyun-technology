@@ -1,4 +1,5 @@
 import {randomUUID} from 'node:crypto';
+import {ownerJobNotice} from './job-status.mjs';
 export async function operatorSchema(pool){await pool.query(`ALTER TABLE messenger_requests ADD COLUMN IF NOT EXISTS lease UUID; ALTER TABLE messenger_requests ADD COLUMN IF NOT EXISTS lease_until TIMESTAMPTZ; ALTER TABLE messenger_requests ADD COLUMN IF NOT EXISTS reply_text TEXT; ALTER TABLE messenger_requests ADD COLUMN IF NOT EXISTS provider_id TEXT; ALTER TABLE messenger_notifications ADD COLUMN IF NOT EXISTS provider_id TEXT; ALTER TABLE messenger_notifications ADD COLUMN IF NOT EXISTS lease UUID; ALTER TABLE messenger_notifications ADD COLUMN IF NOT EXISTS attempted_at TIMESTAMPTZ;`)}
 const uuid=x=>typeof x==='string'&&/^[0-9a-f-]{36}$/i.test(x);
 export async function sendPage(recipient,text){
@@ -32,10 +33,10 @@ export async function handleOperator(path,method,b,pool){
  }
  if(path==='/operator/owner-notify'&&method==='POST'){
   if(!uuid(b.id)||!process.env.OWNER_PSID)return {error:'Owner not paired'};
-  const q=await pool.query('SELECT sender_id FROM messenger_requests WHERE id=$1',[b.id]);if(!q.rowCount)return {error:'Request not found'};
+  const q=await pool.query('SELECT sender_id,status,provider_id FROM messenger_requests WHERE id=$1',[b.id]);if(!q.rowCount)return {error:'Request not found'};
   if(q.rows[0].sender_id===process.env.OWNER_PSID)return {skipped:'owner request'};
   const n=await pool.query("INSERT INTO messenger_notifications(id,request_id,event_type,recipient,status,attempted_at) VALUES($1,$2,'owner_messenger',$3,'processing',NOW()) ON CONFLICT DO NOTHING RETURNING id",[randomUUID(),b.id,process.env.OWNER_PSID]);if(!n.rowCount)return {skipped:'already attempted'};
-  try{const mid=await sendPage(process.env.OWNER_PSID,`Шинэ хүсэлт бүртгэгдлээ. Ажлын дугаар: ${b.id}. Page inbox: https://business.facebook.com/latest/inbox/messenger?asset_id=1309261702280978 . Codex эхний хариуг бэлтгэж байна; ажил дууссан гэж үзэхгүй.`);await pool.query("UPDATE messenger_notifications SET status='sent',provider_id=$2 WHERE id=$1",[n.rows[0].id,mid]);return {sent:true}}catch{await pool.query("UPDATE messenger_notifications SET status='review' WHERE id=$1",[n.rows[0].id]);return {sent:false,needsReview:true}};
+  try{const mid=await sendPage(process.env.OWNER_PSID,ownerJobNotice(b.id,q.rows[0]));await pool.query("UPDATE messenger_notifications SET status='sent',provider_id=$2 WHERE id=$1",[n.rows[0].id,mid]);return {sent:true}}catch{await pool.query("UPDATE messenger_notifications SET status='review' WHERE id=$1",[n.rows[0].id]);return {sent:false,needsReview:true}};
  }
  if(path==='/operator/mail/claim'&&method==='POST'){
   const lease=randomUUID();const row=await pool.query("WITH next AS (SELECT id FROM messenger_notifications WHERE status='pending' AND event_type='new_request' ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT 1) UPDATE messenger_notifications AS n SET status='processing',lease=$1,attempted_at=NOW() FROM next WHERE n.id=next.id RETURNING n.id,n.request_id,n.lease",[lease]);return {notification:row.rows[0]||null};

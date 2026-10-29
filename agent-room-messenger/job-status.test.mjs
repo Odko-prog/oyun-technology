@@ -1,6 +1,24 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {presentJobStatus,readOwnedJobStatus,priorJobStatuses} from './job-status.mjs';
+import {presentJobStatus,readOwnedJobStatus,priorJobStatuses,ownerJobNotice} from './job-status.mjs';
+import {handleOperator} from './operator.mjs';
+test('existing owner notice conflict stops before provider access',async()=>{
+ const previous=process.env.OWNER_PSID;process.env.OWNER_PSID='123456789';
+ try{
+  let calls=0;
+  const pool={query:async(sql)=>{calls++;if(sql.startsWith('SELECT sender_id,status,provider_id'))return {rowCount:1,rows:[{sender_id:'987654321',status:'completed',provider_id:'fixture'}]};assert.match(sql,/ON CONFLICT DO NOTHING/);return {rowCount:0,rows:[]};}};
+  assert.deepEqual(await handleOperator('/operator/owner-notify','POST',{id:'00000000-0000-0000-0000-000000000001'},pool),{skipped:'already attempted'});
+  assert.equal(calls,2);
+ }finally{if(previous===undefined)delete process.env.OWNER_PSID;else process.env.OWNER_PSID=previous;}
+});
+test('owner notice reflects durable outcome rather than claiming generation is still starting',()=>{
+ const id='00000000-0000-0000-0000-000000000001';
+ assert.match(ownerJobNotice(id,{status:'completed',provider_id:'private-receipt'}),/Үр дүнг илгээсэн/);
+ for(const request of [{status:'completed'},{status:'review',provider_id:'private-receipt'},{status:'dispatching'}]){
+  const text=ownerJobNotice(id,request);assert.ok(!text.includes('Үр дүнг илгээсэн'));assert.ok(!text.includes('private-receipt'));
+ }
+ assert.match(ownerJobNotice(id,{status:'awaiting_customer',provider_id:'private-receipt'}),/нэмэлт мэдээлэл эсвэл зөвшөөрөл/);
+});
 test('completion requires persisted provider receipt, not status alone',()=>{
   assert.equal(presentJobStatus({status:'completed'}).state,'review');
   assert.equal(presentJobStatus({status:'completed',provider_id:'fixture'}).state,'completed');

@@ -11,6 +11,13 @@ export function presentJobStatus(request) {
   return {state:'review',label:'Ажлын төлөвийг шалгах шаардлагатай',terminal:false};
 }
 
+// Called by the existing once-only owner notification after delivery processing.
+// Receipt-backed completion is distinct from an acknowledgment or review reply.
+export function ownerJobNotice(requestId,request) {
+  const status=presentJobStatus(request);
+  return `Ажлын дугаар: ${requestId}. Төлөв: ${status.label}. Page inbox: https://business.facebook.com/latest/inbox/messenger?asset_id=1309261702280978 . Хэрэглэгч уншсан эсэх, хариуны чанарыг тусад нь шалгана.`;
+}
+
 // Caller must obtain senderId from a verified signed Page event/session,
 // never from a browser-supplied conversation/profile ID.
 export async function readOwnedJobStatus(pool,requestId,trustedBinding) {
