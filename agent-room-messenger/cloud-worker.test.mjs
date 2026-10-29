@@ -175,3 +175,56 @@ test('successful empty poll clears transient queue error',async()=>{
   assert.ok(claims>=2);assert.equal(worker.state.status,'ready');assert.ok(worker.state.lastPoll);
  }finally{await worker?.stop();await rm(dir,{recursive:true,force:true});}
 });
+
+async function timeoutIsolationFixture(codes){
+ const {mkdtemp,writeFile,rm}=await import('node:fs/promises');
+ const {tmpdir}=await import('node:os');const {join}=await import('node:path');
+ const dir=await mkdtemp(join(tmpdir(),'agent-room-timeout-isolation-'));
+ let worker,generated=0,sends=0,claims=0;const reviewed=[];
+ try{
+  await writeFile(join(dir,'auth.json'),'{}');
+  const pool={connect:async()=>({query:async()=>({rows:[{acquired:true}]}),release(){}}),query:async(sql,args)=>{
+   if(sql.startsWith('UPDATE messenger_requests'))reviewed.push(args[0]);
+   return {rows:sql.includes('INSERT INTO messenger_goal_steps')?[{goal_id:args[0]}]:[]};
+  }};
+  worker=startCloudWorker(pool,async(route)=>{
+   if(route==='/operator/claim'){const n=claims++;return n<codes.length?{request:{...job,id:'isolation-'+n}}:{};}
+   if(route==='/operator/result'){sends++;return {sent:true};}return {};
+  },{env:{CLOUD_WORKER_ENABLED:'true',CODEX_HOME:dir},generate:async()=>{
+   const code=codes[generated++];if(code)throw Object.assign(Error('fixture'),{code});
+   return {reply:'Fixture result',status:'completed'};
+  }});
+  const until=Date.now()+3000;
+  while(Date.now()<until&&generated<codes.length&&worker.state.status!=='generation-error-review-required')await new Promise(r=>setTimeout(r,5));
+  await worker.stop();
+  return {generated,sends,reviewed,lastFailure:worker.state.lastFailure,consecutiveTimeouts:worker.state.consecutiveTimeouts,claims};
+ }finally{await worker?.stop();await rm(dir,{recursive:true,force:true});}
+}
+test('timeout isolation continues another job without retrying or sending failed request',async()=>{
+ const r=await timeoutIsolationFixture(['AI_TIMEOUT',null]);
+ assert.equal(r.generated,2);assert.equal(r.sends,1);assert.deepEqual(r.reviewed,['isolation-0']);
+ assert.equal(r.lastFailure.failureCode,'AI_TIMEOUT');assert.equal(r.consecutiveTimeouts,0);
+});
+test('timeout isolation retains auth approval and unclassified generation breaker',async()=>{
+ const r=await timeoutIsolationFixture(['UNCLASSIFIED',null]);assert.equal(r.generated,1);assert.equal(r.sends,0);
+});
+test('timeout isolation stops after three consecutive timeouts',async()=>{
+ const r=await timeoutIsolationFixture(['AI_TIMEOUT','AI_TIMEOUT','AI_TIMEOUT',null]);
+ assert.equal(r.generated,3);assert.equal(r.sends,0);assert.equal(r.consecutiveTimeouts,3);
+ assert.deepEqual(r.reviewed,['isolation-0','isolation-1','isolation-2']);
+});
+
+test('committed inbound sensor wakes an idle worker without a second dispatcher or model call',async()=>{
+ const {mkdtemp,writeFile,rm}=await import('node:fs/promises');const {tmpdir}=await import('node:os');const {join}=await import('node:path');
+ const dir=await mkdtemp(join(tmpdir(),'agent-room-wake-'));let worker,claims=0;
+ try{
+  await writeFile(join(dir,'auth.json'),'{}');
+  worker=startCloudWorker({connect:async()=>({query:async()=>({rows:[{acquired:true}]}),release(){}})},async()=>{claims++;return {};},{env:{CLOUD_WORKER_ENABLED:'true',CODEX_HOME:dir},generate:async()=>{throw Error('no model');}});
+  while(!worker.state.lastPoll)await new Promise(r=>setTimeout(r,5));
+  const before=claims;worker.notifyCommitted();
+  const until=Date.now()+300;while(claims===before&&Date.now()<until)await new Promise(r=>setTimeout(r,5));
+  assert.ok(claims>before,'signal must wake before the1second polling timer');
+  assert.equal(worker.state.committedSignals,1);assert.ok(worker.state.lastInboundAt);
+  assert.equal(worker.state.lastResult,null);
+ }finally{await worker?.stop();await rm(dir,{recursive:true,force:true});}
+});

@@ -107,7 +107,7 @@ export async function processRequest(pool,handle,job,generate=generateReply,opti
 }
 
 export function startCloudWorker(pool,handle,{env=process.env,generate=generateReply}={}){
- const state={mode:'cloud-codex',enabled:env.CLOUD_WORKER_ENABLED==='true',deviceBridgeEnabled:env.DEVICE_BRIDGE_ENABLED==='true',executionEnabled:env.CLOUD_EXECUTOR_ENABLED!=='false',status:'disabled',lastPoll:null,lastResult:null};
+ const state={mode:'cloud-codex',enabled:env.CLOUD_WORKER_ENABLED==='true',deviceBridgeEnabled:env.DEVICE_BRIDGE_ENABLED==='true',executionEnabled:env.CLOUD_EXECUTOR_ENABLED!=='false',status:'disabled',lastPoll:null,lastResult:null,lastFailure:null,consecutiveTimeouts:0,lastInboundAt:null,committedSignals:0};
  let stopping=false,wake=null,lock=null;const abort=new AbortController();
  const done=(async()=>{
   if(!state.enabled)return;
@@ -123,15 +123,17 @@ export function startCloudWorker(pool,handle,{env=process.env,generate=generateR
      const claim=await handle('/operator/claim','POST',{},pool);state.lastPoll=new Date().toISOString();
      if(claim.blocked||claim.error)throw Error('Queue unavailable');
      state.status='ready';
-     if(claim.request){state.status='processing';state.lastResult=await processRequest(pool,handle,claim.request,generate,{env,signal:abort.signal});console.log(JSON.stringify({event:'cloud_reply',...state.lastResult}));if(state.lastResult.generationFailed){state.status='generation-error-review-required';break;}state.status='ready';continue;}
+     if(claim.request){state.status='processing';state.lastResult=await processRequest(pool,handle,claim.request,generate,{env,signal:abort.signal});console.log(JSON.stringify({event:'cloud_reply',...state.lastResult}));if(state.lastResult.generationFailed){state.lastFailure={id:state.lastResult.id,failureCode:state.lastResult.failureCode,at:new Date().toISOString()};if(state.lastResult.failureCode==='AI_TIMEOUT'&&++state.consecutiveTimeouts<3){state.status='ready';continue;}state.status='generation-error-review-required';break;}state.consecutiveTimeouts=0;state.status='ready';continue;}
     }catch{state.status='queue-error';console.error('Cloud worker needs operator review');}
     await new Promise(r=>{const timer=setTimeout(r,state.status==='queue-error'?30000:1000);wake=()=>{clearTimeout(timer);r();};});wake=null;
    }
   }catch{state.status='auth-or-startup-required';console.error('Cloud worker requires configured account authentication');}
   finally{if(lock){await lock.query('SELECT pg_advisory_unlock(1309261702,280978)').catch(()=>{});lock.release();}if(stopping)state.status='stopped';}
  })();
- return {state,done,async stop(){stopping=true;wake?.();abort.abort();await done;}};
+ return {state,done,notifyCommitted(){state.lastInboundAt=new Date().toISOString();state.committedSignals++;wake?.();},async stop(){stopping=true;wake?.();abort.abort();await done;}};
 }
+
+
 
 
 

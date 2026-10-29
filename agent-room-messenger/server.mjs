@@ -58,11 +58,13 @@ const server=http.createServer(async(req,res)=>{
    if(Number(req.headers['content-length']||0)>65536)return reply(res,413,{error:'Payload too large'});
    const raw=await rawBody(req);if(!validSignature(raw,req.headers['x-hub-signature-256'],process.env.META_APP_SECRET))return reply(res,403,{error:'Signature rejected'});
    let messages,outgoing,event;try{event=JSON.parse(raw.toString('utf8'));messages=extractEvents(event,PAGE);outgoing=extractOutgoingEvents(event,PAGE)}catch{return reply(res,400,{error:'Invalid event'})}
-   const db=await pool.connect();try{await db.query('BEGIN');await acceptBataarMessages(db,event,{enabled:process.env.BATAAR_MESSENGER_ENABLED==='true'});for(const m of messages){
+   let committedRequests=0;const db=await pool.connect();try{await db.query('BEGIN');await acceptBataarMessages(db,event,{enabled:process.env.BATAAR_MESSENGER_ENABLED==='true'});for(const m of messages){
     const devicePairing=process.env.DEVICE_BRIDGE_ENABLED==='true'&&await bindStoredDeviceFromSignedPage(db,{pageId:PAGE,senderId:m.senderId,text:m.text});
     const id=randomUUID();const inserted=await db.query('INSERT INTO messenger_requests(id,source_id,sender_id,message_text,attachment_types,source_timestamp,attachment_refs,device_pairing) VALUES($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT(source_id) DO NOTHING RETURNING id',[id,m.sourceId,m.senderId,m.text,JSON.stringify(m.attachments),m.timestamp,JSON.stringify(m.attachmentRefs),devicePairing]);
+    if(inserted.rowCount)committedRequests++;
     if(inserted.rowCount&&process.env.NOTIFICATION_EMAIL)await db.query("INSERT INTO messenger_notifications(id,request_id,event_type,recipient) VALUES($1,$2,'new_request',$3) ON CONFLICT DO NOTHING",[randomUUID(),id,process.env.NOTIFICATION_EMAIL]);
    }for(const e of outgoing)await db.query('INSERT INTO messenger_outgoing_context(source_id,sender_id,message_text,attachment_types,source_timestamp) VALUES($1,$2,$3,$4,$5) ON CONFLICT(source_id) DO NOTHING',[e.sourceId,e.senderId,e.text,JSON.stringify(e.attachments),e.timestamp]);await db.query('COMMIT')}catch{await db.query('ROLLBACK');throw Error('Storage unavailable')}finally{db.release()}
+   if(committedRequests>0)cloudWorker?.notifyCommitted();
    // Acknowledge only after durable commit. Notification rows do not mean an email was sent.
    console.log(JSON.stringify({event:'webhook_committed',eventCount:messages.length,outgoingContextCount:outgoing.length}));
    return reply(res,200,{received:true});
@@ -84,3 +86,4 @@ const server=http.createServer(async(req,res)=>{
 for(let attempt=0;attempt<12&&!ready;attempt++){try{await initialize();if(ready){await operatorSchema(pool);await artifactSchema(pool);await inputSchema(pool);await conversationSchema(pool);await goalSchema(pool);await deviceSchema(pool);await deviceTaskSchema(pool);await bataarMessengerSchema(pool);}}catch(error){ready=false;console.error(JSON.stringify({event:'database_initialization_unavailable',code:typeof error.code==='string'?error.code:'unknown',attempt:attempt+1}));await new Promise(resolve=>setTimeout(resolve,5000));}}if(!ready)process.exitCode=1;
 if(ready){cloudWorker=startCloudWorker(pool,handleOperator);bataarWorker=startBataarWorker(pool);bataarMessenger=startBataarMessenger(pool);server.listen(Number(process.env.PORT||10000),'0.0.0.0',()=>console.log('Messenger ingress listening'));}
 process.on('SIGTERM',async()=>{await Promise.all([cloudWorker?.stop(),bataarWorker?.stop(),bataarMessenger?.stop()]);server.close(()=>pool?.end().finally(()=>process.exit(0)));});
+

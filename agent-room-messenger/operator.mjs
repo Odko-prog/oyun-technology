@@ -8,7 +8,13 @@ export async function sendPage(recipient,text){
  const data=await r.json();if(!r.ok||!data.message_id)throw Error('Page delivery requires review');return data.message_id;
 }
 export async function handleOperator(path,method,b,pool){
- if(path==='/operator/pending'&&method==='GET')return {requests:(await pool.query('SELECT id,source_id,sender_id,message_text,status,created_at,attachment_types FROM messenger_requests ORDER BY created_at DESC LIMIT 100')).rows};
+ if(path==='/operator/pending'&&method==='GET'){
+  const requests=(await pool.query('SELECT id,source_id,sender_id,message_text,status,created_at,attachment_types FROM messenger_requests ORDER BY created_at DESC LIMIT 100')).rows;
+  // Aggregate the entire durable queue: the newest100 are not a completeness proof.
+  // A review without a receipt may already have a desktop delivery; never auto-retry it.
+  const summary=(await pool.query(`SELECT COUNT(*)::INT AS total,COUNT(*) FILTER(WHERE status='received')::INT AS queued,COUNT(*) FILTER(WHERE status='processing')::INT AS running,COUNT(*) FILTER(WHERE status='dispatching')::INT AS dispatching,COUNT(*) FILTER(WHERE status='received' AND created_at<NOW()-INTERVAL '2 minutes')::INT AS queued_over_2m,COUNT(*) FILTER(WHERE status IN ('processing','dispatching') AND lease_until<NOW())::INT AS expired_leases,COUNT(*) FILTER(WHERE status='review')::INT AS review,COUNT(*) FILTER(WHERE status='review' AND provider_id IS NULL)::INT AS review_without_api_receipt,MIN(created_at) FILTER(WHERE status='received') AS oldest_queued_at FROM messenger_requests`)).rows[0];
+  return {requests,queueSummary:summary};
+ }
  if(path==='/operator/claim'&&method==='POST'){
   // A crashed worker is held for review. Never blindly repeat an uncertain delivery.
   await pool.query("UPDATE messenger_requests SET status='review' WHERE status IN ('processing','dispatching') AND lease_until<NOW()");
@@ -40,3 +46,4 @@ export async function handleOperator(path,method,b,pool){
  }
  return {error:'Unsupported operation'};
 }
+
