@@ -162,3 +162,16 @@ test('status storage failure holds preparation for review without generation or 
  const result=await processRequest(pool,async()=>{sent++;},job,async()=>{generated++;});
  assert.equal(result.failureStage,'preparation');assert.equal(result.review,true);assert.equal(generated,0);assert.equal(sent,0);
 });
+test('successful empty poll clears transient queue error',async()=>{
+ const {mkdtemp,writeFile,rm}=await import('node:fs/promises');
+ const {tmpdir}=await import('node:os');const {join}=await import('node:path');
+ const dir=await mkdtemp(join(tmpdir(),'agent-room-recovery-test-'));let worker,claims=0;
+ try{
+  await writeFile(join(dir,'auth.json'),'{}');
+  const pool={connect:async()=>({query:async()=>({rows:[{acquired:true}]}),release(){}})};
+  worker=startCloudWorker(pool,async()=>{if(++claims===1)throw Error('synthetic transient');return {};},{env:{CLOUD_WORKER_ENABLED:'true',CODEX_HOME:dir},generate:async()=>{throw Error('must not generate');}});
+  const deadline=Date.now()+33000;
+  while(claims<2&&Date.now()<deadline)await new Promise(r=>setTimeout(r,20));
+  assert.ok(claims>=2);assert.equal(worker.state.status,'ready');assert.ok(worker.state.lastPoll);
+ }finally{await worker?.stop();await rm(dir,{recursive:true,force:true});}
+});

@@ -122,6 +122,7 @@ export function startCloudWorker(pool,handle,{env=process.env,generate=generateR
      if(env.DEVICE_BRIDGE_ENABLED==='true'){const deviceResult=await dispatchOneDeviceResult(pool,sendPage);if(deviceResult)console.log(JSON.stringify({event:'device_result',...deviceResult}));}
      const claim=await handle('/operator/claim','POST',{},pool);state.lastPoll=new Date().toISOString();
      if(claim.blocked||claim.error)throw Error('Queue unavailable');
+     state.status='ready';
      if(claim.request){state.status='processing';state.lastResult=await processRequest(pool,handle,claim.request,generate,{env,signal:abort.signal});console.log(JSON.stringify({event:'cloud_reply',...state.lastResult}));if(state.lastResult.generationFailed){state.status='generation-error-review-required';break;}state.status='ready';continue;}
     }catch{state.status='queue-error';console.error('Cloud worker needs operator review');}
     await new Promise(r=>{const timer=setTimeout(r,state.status==='queue-error'?30000:1000);wake=()=>{clearTimeout(timer);r();};});wake=null;
@@ -131,6 +132,7 @@ export function startCloudWorker(pool,handle,{env=process.env,generate=generateR
  })();
  return {state,done,async stop(){stopping=true;wake?.();abort.abort();await done;}};
 }
+
 
 
 
