@@ -1,3 +1,4 @@
+import {reviewTextAnswer} from './answer-review.mjs';
 import {priorJobStatuses} from './job-status.mjs';
 import {activeCustomerDevices,enqueueDeviceTask,dispatchOneDeviceResult} from './device-tasks.mjs';
 import {sendPage} from './operator.mjs';
@@ -29,7 +30,7 @@ export function childEnvironment(env){
  out.CODEX_HOME=env.CODEX_HOME||'/var/data/codex';return out;
 }
 export function failureMetadata(error){
- const allowed=new Set(['AGENT_INPUT_INVALID','AGENT_OUTPUT_INVALID','AI_TIMEOUT','AI_PROCESS_START_FAILED','AI_PROCESS_EXIT','AI_ABORTED','AI_CONTEXT_LIMIT']);
+ const allowed=new Set(['AGENT_INPUT_INVALID','AGENT_OUTPUT_INVALID','AI_TIMEOUT','AI_PROCESS_START_FAILED','AI_PROCESS_EXIT','AI_ABORTED','AI_CONTEXT_LIMIT','AGENT_ANSWER_REVIEW_FAILED']);
  const failureCode=allowed.has(error?.code)?error.code:'UNCLASSIFIED';
  const metadata={failureCode};
  if(failureCode==='AI_PROCESS_EXIT'){
@@ -38,7 +39,7 @@ export function failureMetadata(error){
  }
  return metadata;
 }
-export async function generateReply(input,{env=process.env,signal}={}){
+export async function generateReply(input,{env=process.env,signal,reviewOnly=false}={}){
  const dir=await mkdtemp(join(tmpdir(),'agent-room-'));
  try{
   const schema=join(dir,'reply.schema.json'),output=join(dir,'reply.json');
@@ -47,7 +48,7 @@ export async function generateReply(input,{env=process.env,signal}={}){
   try{visual=await prepareImageInputs(input,dir);}catch{const error=Error('Image input requires review');error.code='AGENT_INPUT_INVALID';throw error;}
   if(execution){await mkdir(join(dir,'outputs'),{mode:0o700});await writeFile(join(dir,'inputs.json'),JSON.stringify(input.input_file_bytes||{}),{mode:0o600});}
   await writeFile(schema,JSON.stringify(execution?executionSchema:replySchema),{mode:0o600});
-  const args=['exec','--ignore-user-config','--ephemeral','--sandbox','read-only','--skip-git-repo-check','--disable','shell_tool','--disable','unified_exec','--disable','apps','--disable','browser_use','--disable','computer_use','--disable','multi_agent','--disable','skill_search','-c','web_search="live"','-c','cli_auth_credentials_store="file"','-C',dir,'--output-schema',schema,'-o',output,'-'];
+  const args=['exec','--ignore-user-config','--ephemeral','--sandbox','read-only','--skip-git-repo-check','--disable','shell_tool','--disable','unified_exec','--disable','apps','--disable','browser_use','--disable','computer_use','--disable','multi_agent','--disable','skill_search','-c',reviewOnly?'web_search="disabled"':'web_search="live"','-c','cli_auth_credentials_store="file"','-C',dir,'--output-schema',schema,'-o',output,'-'];
   if(execution)args.push(...executorConfig(dir));
   args.push(...visual.args);
   const runtimeInstructions=instructions;
@@ -56,8 +57,8 @@ export async function generateReply(input,{env=process.env,signal}={}){
   if(Buffer.byteLength(prompt)>500000)throw Object.assign(Error('Conversation needs operator review'),{code:'AI_CONTEXT_LIMIT'});
   await new Promise((ok,no)=>{
    const child=spawn(env.CODEX_BIN||resolve('node_modules/.bin/codex'),args,{env:childEnvironment(env),stdio:['pipe','ignore','ignore'],signal});
-   const timer=setTimeout(()=>{child.kill('SIGTERM');no(Object.assign(Error('AI timeout'),{code:'AI_TIMEOUT'}));},300000);
-   const killTimer=setTimeout(()=>child.kill('SIGKILL'),305000);
+   const timer=setTimeout(()=>{child.kill('SIGTERM');no(Object.assign(Error('AI timeout'),{code:'AI_TIMEOUT'}));},reviewOnly?60000:300000);
+   const killTimer=setTimeout(()=>child.kill('SIGKILL'),reviewOnly?65000:305000);
    child.once('error',()=>{clearTimeout(timer);clearTimeout(killTimer);no(Object.assign(Error('AI execution failed'),{code:signal?.aborted?'AI_ABORTED':'AI_PROCESS_START_FAILED'}));});
    child.once('close',(code,exitSignal)=>{clearTimeout(timer);clearTimeout(killTimer);code===0?ok():no(Object.assign(Error('AI execution failed'),{code:signal?.aborted?'AI_ABORTED':'AI_PROCESS_EXIT',exitCode:code,exitSignal}));});
    child.stdin.on('error',()=>{});child.stdin.end(prompt);
@@ -81,9 +82,14 @@ export async function processRequest(pool,handle,job,generate=generateReply,opti
   const inputs=await prepareJobInputs(pool,job,options);
   const prior_statuses=await priorJobStatuses(pool,job);
   failureStage='generation';
-  const generated=await generate({prior_statuses,connected_devices:devices,history,text:job.device_pairing?'Компьютер холбох хүсэлт':job.message_text,device_pairing:job.device_pairing?{matched:true,state:'pending_owner'}:null,attachment_types:job.attachment_types,input_files:inputs.metadata,input_file_bytes:inputs.files,attachmentIssue:job.attachment_types?.length&&!inputs.metadata.length?'Attachment bytes unavailable; do not claim to inspect them':null},options);
+  const customerInput={prior_statuses,connected_devices:devices,history,text:job.device_pairing?'Компьютер холбох хүсэлт':job.message_text,device_pairing:job.device_pairing?{matched:true,state:'pending_owner'}:null,attachment_types:job.attachment_types,input_files:inputs.metadata,input_file_bytes:inputs.files,attachmentIssue:job.attachment_types?.length&&!inputs.metadata.length?'Attachment bytes unavailable; do not claim to inspect them':null};
+  const generated=await generate(customerInput,options);
   failureStage='verification';
   const draft=validateReply(generated);
+  if(options.reviewGenerate&&!job.device_pairing&&!generated.device_task&&!job.attachment_types?.length&&!generated.artifacts?.length){
+   const verdict=await reviewTextAnswer(customerInput,generated,options.reviewGenerate,options);
+   if(!verdict.accepted)throw Object.assign(Error('Answer requires correction'),{code:'AGENT_ANSWER_REVIEW_FAILED'});
+  }
   await recordGoalStep(pool,job,{...draft,verification:generated.verification,continues_request_id:generated.continues_request_id});
   if(generated.device_task){if(options.env?.DEVICE_BRIDGE_ENABLED!=='true'||draft.status!=='awaiting_customer'||!devices.some(d=>d.id===generated.device_task.session_id))throw Error('Unverified device task');await enqueueDeviceTask(pool,job,generated.device_task);}
   if(generated.artifacts?.length){
@@ -106,7 +112,7 @@ export async function processRequest(pool,handle,job,generate=generateReply,opti
  }
 }
 
-export function startCloudWorker(pool,handle,{env=process.env,generate=generateReply}={}){
+export function startCloudWorker(pool,handle,{env=process.env,generate=generateReply,reviewGenerate=generate===generateReply?generateReply:null}={}){
  const state={mode:'cloud-codex',enabled:env.CLOUD_WORKER_ENABLED==='true',deviceBridgeEnabled:env.DEVICE_BRIDGE_ENABLED==='true',executionEnabled:env.CLOUD_EXECUTOR_ENABLED!=='false',status:'disabled',lastPoll:null,lastResult:null,lastFailure:null,consecutiveTimeouts:0,lastInboundAt:null,committedSignals:0};
  let stopping=false,wake=null,lock=null;const abort=new AbortController();
  const done=(async()=>{
@@ -123,7 +129,7 @@ export function startCloudWorker(pool,handle,{env=process.env,generate=generateR
      const claim=await handle('/operator/claim','POST',{},pool);state.lastPoll=new Date().toISOString();
      if(claim.blocked||claim.error)throw Error('Queue unavailable');
      state.status='ready';
-     if(claim.request){state.status='processing';state.lastResult=await processRequest(pool,handle,claim.request,generate,{env,signal:abort.signal});console.log(JSON.stringify({event:'cloud_reply',...state.lastResult}));if(state.lastResult.generationFailed){state.lastFailure={id:state.lastResult.id,failureCode:state.lastResult.failureCode,at:new Date().toISOString()};if(state.lastResult.failureCode==='AI_TIMEOUT'&&++state.consecutiveTimeouts<3){state.status='ready';continue;}state.status='generation-error-review-required';break;}state.consecutiveTimeouts=0;state.status='ready';continue;}
+     if(claim.request){state.status='processing';state.lastResult=await processRequest(pool,handle,claim.request,generate,{env,signal:abort.signal,reviewGenerate});console.log(JSON.stringify({event:'cloud_reply',...state.lastResult}));if(state.lastResult.generationFailed){state.lastFailure={id:state.lastResult.id,failureCode:state.lastResult.failureCode,at:new Date().toISOString()};if(state.lastResult.failureCode==='AI_TIMEOUT'&&++state.consecutiveTimeouts<3){state.status='ready';continue;}state.status='generation-error-review-required';break;}state.consecutiveTimeouts=0;state.status='ready';continue;}
     }catch{state.status='queue-error';console.error('Cloud worker needs operator review');}
     await new Promise(r=>{const timer=setTimeout(r,state.status==='queue-error'?30000:1000);wake=()=>{clearTimeout(timer);r();};});wake=null;
    }

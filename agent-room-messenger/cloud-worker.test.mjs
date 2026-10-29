@@ -228,3 +228,16 @@ test('committed inbound sensor wakes an idle worker without a second dispatcher 
   assert.equal(worker.state.lastResult,null);
  }finally{await worker?.stop();await rm(dir,{recursive:true,force:true});}
 });
+
+test('answer review rejection holds the request before any provider send',async()=>{
+ let sends=0;const result=await processRequest({query:async()=>({rows:[]})},async()=>{sends++;return {sent:true};},job,async()=>({reply:'Incorrect fixture answer',status:'review',verification:'fixture'}),{reviewGenerate:async()=>({reply:'{"accepted":false,"issues":["incorrect"]}'})});
+ assert.equal(result.failureCode,'AGENT_ANSWER_REVIEW_FAILED');assert.equal(result.failureStage,'verification');assert.equal(result.generationFailed,false);assert.equal(sends,0);
+});
+test('approved answer still uses one existing CAS delivery',async()=>{
+ let sends=0,checks=0;const result=await processRequest({query:async()=>({rows:[]})},async(route)=>{if(route==='/operator/result')sends++;return {sent:true};},job,async()=>({reply:'12',status:'completed',verification:'fixture'}),{reviewGenerate:async(input,options)=>{checks++;assert.equal(options.reviewOnly,true);assert.equal(options.env.CLOUD_EXECUTOR_ENABLED,'false');return {reply:'{"accepted":true,"issues":[]}'};}});
+ assert.equal(result.sent,true);assert.equal(checks,1);assert.equal(sends,1);
+});
+test('reviewer outage cannot send unchecked text or stop unrelated generation',async()=>{
+ let sends=0;const result=await processRequest({query:async()=>({rows:[]})},async()=>{sends++;},job,async()=>({reply:'fixture',status:'completed'}),{reviewGenerate:async()=>{throw Error('fixture reviewer outage');}});
+ assert.equal(result.review,true);assert.equal(result.failureStage,'verification');assert.equal(result.generationFailed,false);assert.equal(sends,0);
+});
