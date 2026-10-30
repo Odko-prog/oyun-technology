@@ -35,3 +35,11 @@ test('independent current-source review enables live research while retaining ex
   return {reply:'{"accepted":false,"issues":["unsupported_claim"]}'};
  },{env:{CLOUD_EXECUTOR_ENABLED:'true'}});
 });
+test('cited answer cannot pass on model claims without observed independent web evidence',async()=>{
+ const draft={reply:'Current price: 100. Source https://example.com/product',status:'completed'};
+ for(const evidence of [undefined,{webSearchCompleted:0}]){
+  const v=await reviewTextAnswer({},draft,async()=>({reply:'{"accepted":true,"issues":[]}',reviewEvidence:evidence}));
+  assert.deepEqual(v,{accepted:false,issues:['unsupported_claim']});
+ }
+ const v=await reviewTextAnswer({},draft,async()=>({reply:'{"accepted":true,"issues":[]}',reviewEvidence:{webSearchCompleted:1}}));assert.equal(v.accepted,true);
+});

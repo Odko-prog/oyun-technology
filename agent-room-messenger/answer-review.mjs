@@ -25,5 +25,9 @@ export async function reviewTextAnswer(input,draft,generate,options={}){
  const review=answerReviewInput(input,draft);
  review.text='For current prices, stock, news or other time-sensitive factual claims, independently open the cited primary sources using live web search. A URL or the first answer\'s verification statement alone is not evidence. Compare exact product variants, amounts, tax and availability; reject unsupported_claim if current source evidence is unavailable or contradicts the draft. Do not use a historical quoted price as a current offer. No external writes or customer communication.\n'+review.text;
  const result=await generate(review,{...options,reviewOnly:true,reviewWeb:true,env:{...options.env,CLOUD_EXECUTOR_ENABLED:'false'}});
- return parseAnswerReview(result.reply);
+ const verdict=parseAnswerReview(result.reply);
+ // An accepted cited answer must have an independently observed web-tool event.
+ // The counter is trusted process metadata, never the model's own assertion.
+ if(verdict.accepted&&/https?:\/\//i.test(draft.reply||'')&&!(result.reviewEvidence?.webSearchCompleted>0))return {accepted:false,issues:['unsupported_claim']};
+ return verdict;
 }
