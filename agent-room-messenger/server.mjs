@@ -1,3 +1,4 @@
+import {handleBataarAdmin,bataarAdminHtml} from './bataar-leads.mjs';
 import {bataarMessengerSchema,acceptBataarMessages,startBataarMessenger} from './bataar-messenger.mjs';
 import {startBataarWorker} from './bataar-worker.mjs';
 import {deviceSchema,handleDeviceRequest,bindStoredDeviceFromSignedPage} from './device-store.mjs';
@@ -27,6 +28,7 @@ async function rawBody(req,limit=65536){const chunks=[];let size=0;for await(con
 const server=http.createServer(async(req,res)=>{
  try{
   const url=new URL(req.url,'http://localhost');
+  if(req.method==='GET'&&url.pathname==='/bataar/admin'){res.writeHead(200,{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer','Content-Security-Policy':"default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'"});return res.end(bataarAdminHtml);}
   if(req.method==='GET'&&serveOnboarding(url.pathname,res,localAgentAssets,{deviceEnabled:process.env.DEVICE_BRIDGE_ENABLED==='true'}))return;
   if(url.pathname.startsWith('/device/')){
    if(!ready||process.env.DEVICE_BRIDGE_ENABLED!=='true')return reply(res,503,{error:'Attended device bridge unavailable'});
@@ -44,7 +46,7 @@ const server=http.createServer(async(req,res)=>{
    if(!process.env.OPERATOR_TOKEN||!sameSecret(req.headers.authorization,'Bearer '+process.env.OPERATOR_TOKEN))return reply(res,401,{error:'Unauthorized'});
    if(!ready)return reply(res,503,{error:'Storage unavailable'});
    let b={};if(req.method==='POST'){try{b=JSON.parse((await rawBody(req)).toString('utf8'))}catch{return reply(res,400,{error:'Invalid request'})}}
-   const result=await handleOperator(url.pathname,req.method,b,pool);return reply(res,result.error?409:200,result);
+   const result=await handleBataarAdmin(url.pathname,req.method,b,pool)||await handleOperator(url.pathname,req.method,b,pool);return reply(res,result.error?409:200,result);
   }
   if(req.method==='GET'&&url.pathname==='/health'){if(!ready)return reply(res,503,{ready:false});await pool.query('SELECT 1');return reply(res,200,{ready:true,webhookConfigured:Boolean(process.env.META_APP_SECRET&&process.env.META_VERIFY_TOKEN),emailDeliveryEnabled:false,cloudWorker:cloudWorker?.state||{status:'disabled'},bataarWorker:bataarWorker?.state||{status:'disabled'},bataarMessenger:bataarMessenger?.state||{status:'disabled'}})}
   if(url.pathname==='/webhook'&&req.method==='GET'){
