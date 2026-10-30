@@ -18,7 +18,7 @@ export function validateDraft(draft){
   if(!draft||typeof draft.message!=='string'||draft.message.length<100||draft.message.length>4000||draft.verified!==true||!Array.isArray(draft.sources)||!draft.sources.length)throw Error('Draft needs review');
   for(const source of draft.sources){
     const url=new URL(source.url);
-    const allowed=['bataartravel.mn','globalsnowleopard.org','unwto.org','untourism.int','1212.mn','nso.mn','montsame.mn'];
+    const allowed=['bataartravel.mn','globalsnowleopard.org','unwto.org','untourism.int','1212.mn','nso.mn','montsame.mn','ncch.gov.mn','gurvantes.omnogovi.khural.mn','usgs.gov','science.nasa.gov','si.edu','amnh.org','nature.com'];
     if(url.protocol!=='https:'||url.username||url.password||!allowed.some(h=>url.hostname===h||url.hostname.endsWith('.'+h))||typeof source.checked!=='string'||!Number.isFinite(Date.parse(source.checked)))throw Error('Unverified source');
     if(!draft.message.includes(source.url))throw Error('Source missing from post');
   }
