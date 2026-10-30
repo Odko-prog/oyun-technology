@@ -8,9 +8,17 @@ export async function sendPage(recipient,text){
  const r=await fetch(`https://graph.facebook.com/v26.0/${process.env.META_PAGE_ID||'1309261702280978'}/messages`,{method:'POST',headers:{Authorization:'Bearer '+process.env.PAGE_ACCESS_TOKEN,'Content-Type':'application/json'},body:JSON.stringify({recipient:{id:String(recipient)},messaging_type:'RESPONSE',message:{text}}),signal:AbortSignal.timeout(20000)});
  const data=await r.json();if(!r.ok||!data.message_id)throw Error('Page delivery requires review');return data.message_id;
 }
+export function operatorFailure(value){
+ if(!value||typeof value!=='object'||Array.isArray(value))return null;
+ const codes=new Set(['AGENT_INPUT_INVALID','AGENT_OUTPUT_INVALID','AI_TIMEOUT','AI_PROCESS_START_FAILED','AI_PROCESS_EXIT','AI_ABORTED','AI_CONTEXT_LIMIT','AGENT_ANSWER_REVIEW_FAILED','UNCLASSIFIED']);
+ const out={failureCode:codes.has(value.failureCode)?value.failureCode:'UNCLASSIFIED'};
+ if(out.failureCode==='AGENT_ANSWER_REVIEW_FAILED'&&Array.isArray(value.reviewIssues))out.reviewIssues=[...new Set(value.reviewIssues.filter(x=>['incorrect','incomplete','unsupported_claim','needs_input'].includes(x)))].slice(0,5);
+ if(['generation','verification','delivery'].includes(value.failureStage))out.failureStage=value.failureStage;
+ return out;
+}
 export async function handleOperator(path,method,b,pool){
  if(path==='/operator/pending'&&method==='GET'){
-  const requests=(await pool.query('SELECT id,source_id,sender_id,message_text,status,created_at,attachment_types FROM messenger_requests ORDER BY created_at DESC LIMIT 100')).rows;
+  const requests=(await pool.query('SELECT id,source_id,sender_id,message_text,status,created_at,attachment_types,execution_failure FROM messenger_requests ORDER BY created_at DESC LIMIT 100')).rows.map(({execution_failure,...row})=>({...row,execution_failure:operatorFailure(execution_failure)}));
   // Aggregate the entire durable queue: the newest100 are not a completeness proof.
   // A review without a receipt may already have a desktop delivery; never auto-retry it.
   const summary=(await pool.query(`SELECT COUNT(*)::INT AS total,COUNT(*) FILTER(WHERE status='received')::INT AS queued,COUNT(*) FILTER(WHERE status='processing')::INT AS running,COUNT(*) FILTER(WHERE status='dispatching')::INT AS dispatching,COUNT(*) FILTER(WHERE status='received' AND created_at<NOW()-INTERVAL '2 minutes')::INT AS queued_over_2m,COUNT(*) FILTER(WHERE status IN ('processing','dispatching') AND lease_until<NOW())::INT AS expired_leases,COUNT(*) FILTER(WHERE status='review')::INT AS review,COUNT(*) FILTER(WHERE status='review' AND provider_id IS NULL)::INT AS review_without_api_receipt,MIN(created_at) FILTER(WHERE status='received') AS oldest_queued_at FROM messenger_requests`)).rows[0];
