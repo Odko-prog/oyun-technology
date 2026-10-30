@@ -28,3 +28,10 @@ test('text answer review uses a separate text-only generation call and never sen
  let calls=0;const r=await reviewTextAnswer({text:'7+5?'},{reply:'13'},async(input,options)=>{calls++;assert.equal(options.env.CLOUD_EXECUTOR_ENABLED,'false');return {reply:'{"accepted":false,"issues":["incorrect"]}'};},{env:{CLOUD_EXECUTOR_ENABLED:'true'}});
  assert.equal(calls,1);assert.equal(r.accepted,false);
 });
+test('independent current-source review enables live research while retaining executor isolation',async()=>{
+ await reviewTextAnswer({text:'Current price?'},{reply:'Fixture price',status:'completed'},async(input,options)=>{
+  assert.equal(options.reviewOnly,true);assert.equal(options.reviewWeb,true);assert.equal(options.env.CLOUD_EXECUTOR_ENABLED,'false');
+  assert.match(input.text,/independently open the cited primary sources/);assert.match(input.text,/exact product variants/);
+  return {reply:'{"accepted":false,"issues":["unsupported_claim"]}'};
+ },{env:{CLOUD_EXECUTOR_ENABLED:'true'}});
+});

@@ -22,6 +22,8 @@ export function answerReviewInput(input,draft){
  return {history:[],text,attachment_types:input_files.length?['image']:[],input_files,input_file_bytes};
 }
 export async function reviewTextAnswer(input,draft,generate,options={}){
- const result=await generate(answerReviewInput(input,draft),{...options,reviewOnly:true,env:{...options.env,CLOUD_EXECUTOR_ENABLED:'false'}});
+ const review=answerReviewInput(input,draft);
+ review.text='For current prices, stock, news or other time-sensitive factual claims, independently open the cited primary sources using live web search. A URL or the first answer\'s verification statement alone is not evidence. Compare exact product variants, amounts, tax and availability; reject unsupported_claim if current source evidence is unavailable or contradicts the draft. Do not use a historical quoted price as a current offer. No external writes or customer communication.\n'+review.text;
+ const result=await generate(review,{...options,reviewOnly:true,reviewWeb:true,env:{...options.env,CLOUD_EXECUTOR_ENABLED:'false'}});
  return parseAnswerReview(result.reply);
 }
