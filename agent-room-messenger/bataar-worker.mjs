@@ -58,10 +58,10 @@ export function startBataarWorker(pool,{env=process.env,generate=generateBataar,
       const preflightPosts=(await graph(PAGE_ID+'/published_posts?fields=id,message,created_time,permalink_url&limit=20')).data||[];
       const preflightSlot=env.BATAAR_START_AT;
       const preflightRaw=await generate({kind:'post',slot:preflightSlot,history:[],recentPosts:preflightPosts,preflight:true},{env,signal:abort.signal});
-      let preflight;try{preflight=validateDraft(preflightRaw);}catch{state.draftValidation={messageLength:typeof preflightRaw.message==='string'?preflightRaw.message.length:0,verified:preflightRaw.verified===true,sourceCount:Array.isArray(preflightRaw.sources)?preflightRaw.sources.length:0,sourceHosts:(preflightRaw.sources||[]).slice(0,5).map(s=>{try{return new URL(s.url).hostname;}catch{return 'invalid';}}),sourceLinksIncluded:(preflightRaw.sources||[]).every(s=>preflightRaw.message?.includes(s.url))};throw Object.assign(Error('Unverified draft'),{code:'DRAFT_VALIDATION'});}
-      if(preflightPosts.some(p=>p.message===preflight.message))throw Error('Duplicate preview');
+      let preflight;try{if(preflightRaw?.verified!==false)preflight=validateDraft(preflightRaw);else state.preflightContentVerified=false;}catch{state.draftValidation={messageLength:typeof preflightRaw.message==='string'?preflightRaw.message.length:0,verified:preflightRaw.verified===true,sourceCount:Array.isArray(preflightRaw.sources)?preflightRaw.sources.length:0,sourceHosts:(preflightRaw.sources||[]).slice(0,5).map(s=>{try{return new URL(s.url).hostname;}catch{return 'invalid';}}),sourceLinksIncluded:(preflightRaw.sources||[]).every(s=>preflightRaw.message?.includes(s.url))};throw Object.assign(Error('Unverified draft'),{code:'DRAFT_VALIDATION'});}
+      if(preflight&&preflightPosts.some(p=>p.message===preflight.message))throw Error('Duplicate preview');
       await pool.query('CREATE TABLE IF NOT EXISTS bataar_draft_previews(slot TEXT PRIMARY KEY,draft JSONB NOT NULL,created_at TIMESTAMPTZ NOT NULL DEFAULT NOW())');
-      await pool.query('INSERT INTO bataar_draft_previews(slot,draft) VALUES($1,$2) ON CONFLICT(slot) DO UPDATE SET draft=EXCLUDED.draft,created_at=NOW()',[preflightSlot,JSON.stringify(preflight)]);
+      if(preflight)await pool.query('INSERT INTO bataar_draft_previews(slot,draft) VALUES($1,$2) ON CONFLICT(slot) DO UPDATE SET draft=EXCLUDED.draft,created_at=NOW()',[preflightSlot,JSON.stringify(preflight)]);
       state.generatorVerified=true;state.status='ready';
       while(!stopping){
         state.lastPoll=new Date().toISOString();
@@ -79,6 +79,7 @@ export function startBataarWorker(pool,{env=process.env,generate=generateBataar,
               photoSelected=slot.includes('T09:00')&&!(await pool.query("SELECT 1 FROM bataar_media_usage WHERE asset_id='owner-sunset-20261021'")).rowCount;
               const media=photoSelected?{id:'owner-sunset-20261021',description:'Owner-provided Bataaryn_Ulgii_Duut_Video.mp4 at00:01:00: golden sky, clouds and sun rays with a dark foreground silhouette. Historical video still, not current weather, no verified wildlife or room details. Say эзний өгсөн танилцуулгын бичлэгээс авсан кадр. Do not invent location/date of filming.'}:null;
               const draft=await generate({kind:'post',...data,recentPosts:posts,media},{env,signal:abort.signal});
+              if(draft?.verified===false)throw Object.assign(Error('No verified source for this slot'),{code:'SOURCE_UNAVAILABLE'});
               if(draft.sources.some(s=>s.checked.slice(0,10)!==slot.slice(0,10)))throw Error('Stale verification');
               if(posts.some(p=>p.message===draft.message))throw Error('Duplicate remote content');
               return draft;
