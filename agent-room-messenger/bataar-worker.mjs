@@ -26,11 +26,13 @@ export async function generateBataar(input,{env=process.env,signal}={}){
     return JSON.parse(await readFile(join(dir,'draft.json'),'utf8'));
   }finally{await rm(dir,{recursive:true,force:true});}
 }
+export const CAMP_PHOTO_URL='https://agent-room-messenger-ingress.onrender.com/bataar/camp-sunset.jpg';
 export function graphClient(env,fetcher=fetch){
-  return async function graph(path,{message}={}){
+  return async function graph(path,{message,photoUrl}={}){
     if(!env.MOTHERLAND_PAGE_ACCESS_TOKEN)throw Error('Page token missing');
-    if(!/^me\?fields=(id|id,name)$/.test(path)&&!new RegExp('^'+PAGE_ID+'/(published_posts\\?|scheduled_posts\\?|feed$)').test(path)&&!/^\d+(?:_\d+)?\/comments(?:\?|$)/.test(path))throw Error('Unsupported Page operation');
-    const result=await fetcher('https://graph.facebook.com/v26.0/'+path,{method:message===undefined?'GET':'POST',headers:{Authorization:'Bearer '+env.MOTHERLAND_PAGE_ACCESS_TOKEN,'Content-Type':'application/json'},...(message===undefined?{}:{body:JSON.stringify({message})}),signal:AbortSignal.timeout(20000)});
+    if(!/^me\?fields=(id|id,name)$/.test(path)&&!new RegExp('^'+PAGE_ID+'/(published_posts\\?|scheduled_posts\\?|feed$|photos$)').test(path)&&!/^\d+(?:_\d+)?\/comments(?:\?|$)/.test(path))throw Error('Unsupported Page operation');
+    if(photoUrl&&(photoUrl!==CAMP_PHOTO_URL||path!==PAGE_ID+'/photos'||!message))throw Error('Unapproved photo');
+    const result=await fetcher('https://graph.facebook.com/v26.0/'+path,{method:message===undefined?'GET':'POST',headers:{Authorization:'Bearer '+env.MOTHERLAND_PAGE_ACCESS_TOKEN,'Content-Type':'application/json'},...(message===undefined?{}:{body:JSON.stringify(photoUrl?{caption:message,url:photoUrl}:{message})}),signal:AbortSignal.timeout(20000)});
     const body=await result.json();if(!result.ok||body.error)throw Error('Meta authorization or delivery requires review');return body;
   };
 }
@@ -47,6 +49,7 @@ export function startBataarWorker(pool,{env=process.env,generate=generateBataar,
       lock=await pool.connect();
       if(!(await lock.query('SELECT pg_try_advisory_lock(440088839,501409) AS acquired')).rows[0].acquired){state.status='another-worker-active';return;}
       await initializeSchedule(pool);
+      await pool.query('CREATE TABLE IF NOT EXISTS bataar_media_usage(asset_id TEXT PRIMARY KEY,status TEXT NOT NULL,created_at TIMESTAMPTZ NOT NULL DEFAULT NOW())');
       await pool.query('CREATE TABLE IF NOT EXISTS bataar_comment_replies(comment_id TEXT PRIMARY KEY,slot TEXT NOT NULL,status TEXT NOT NULL,provider_id TEXT,created_at TIMESTAMPTZ NOT NULL DEFAULT NOW())');
       const identity=await graph('me?fields=id,name');
       if(String(identity.id)!==PAGE_ID||identity.name!=='Motherland Of Bataar')throw Error('Wrong Page');
@@ -64,6 +67,7 @@ export function startBataarWorker(pool,{env=process.env,generate=generateBataar,
         state.lastPoll=new Date().toISOString();
         const slot=dueSlot(new Date(),env.BATAAR_START_AT);
         if(slot){
+          let photoSelected=false;
           const result=await runSlot({pool,enabled:true,startAt:env.BATAAR_START_AT,
             verifyIdentity:async()=>(await graph('me?fields=id')).id,
             generate:async data=>{
@@ -72,11 +76,20 @@ export function startBataarWorker(pool,{env=process.env,generate=generateBataar,
               const queuedToday=scheduled.filter(p=>localDate(new Date(p.scheduled_publish_time*1000).toISOString())===slot.slice(0,10));
               if(posts.filter(p=>localDate(p.created_time)===slot.slice(0,10)).length+queuedToday.length>=4)throw Object.assign(Error('Daily cap'),{code:'SLOT_RESERVED'});
               if(queuedToday.some(p=>Math.abs(p.scheduled_publish_time*1000-Date.parse(slot))<3600000))throw Object.assign(Error('Native scheduled slot reserved'),{code:'SLOT_RESERVED'});
-              const draft=await generate({kind:'post',...data,recentPosts:posts},{env,signal:abort.signal});
+              photoSelected=slot.includes('T09:00')&&!(await pool.query("SELECT 1 FROM bataar_media_usage WHERE asset_id='owner-sunset-20261021'")).rowCount;
+              const media=photoSelected?{id:'owner-sunset-20261021',description:'Owner-provided Bataaryn_Ulgii_Duut_Video.mp4 at00:01:00: golden sky, clouds and sun rays with a dark foreground silhouette. Historical video still, not current weather, no verified wildlife or room details. Say эзний өгсөн танилцуулгын бичлэгээс авсан кадр. Do not invent location/date of filming.'}:null;
+              const draft=await generate({kind:'post',...data,recentPosts:posts,media},{env,signal:abort.signal});
               if(draft.sources.some(s=>s.checked.slice(0,10)!==slot.slice(0,10)))throw Error('Stale verification');
               if(posts.some(p=>p.message===draft.message))throw Error('Duplicate remote content');
               return draft;
-            },publish:async message=>(await graph(PAGE_ID+'/feed',{message})).id});
+            },publish:async message=>{
+              if(!photoSelected)return (await graph(PAGE_ID+'/feed',{message})).id;
+              const claim=await pool.query("INSERT INTO bataar_media_usage(asset_id,status) VALUES('owner-sunset-20261021','dispatching') ON CONFLICT DO NOTHING RETURNING asset_id");
+              if(!claim.rowCount)throw Error('Photo already attempted');
+              const result=await graph(PAGE_ID+'/photos',{message,photoUrl:CAMP_PHOTO_URL});
+              if(!result.post_id)throw Error('Photo publication needs review');
+              await pool.query("UPDATE bataar_media_usage SET status='published' WHERE asset_id='owner-sunset-20261021'");return result.post_id;
+            }});
           state.lastResult=result;
           if(result.status==='review'){state.status='review-required';break;}
           if(result.status==='published'){
