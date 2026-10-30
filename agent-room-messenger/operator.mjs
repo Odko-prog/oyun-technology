@@ -13,7 +13,7 @@ export function operatorFailure(value){
  const codes=new Set(['AGENT_INPUT_INVALID','AGENT_OUTPUT_INVALID','AI_TIMEOUT','AI_PROCESS_START_FAILED','AI_PROCESS_EXIT','AI_ABORTED','AI_CONTEXT_LIMIT','AGENT_ANSWER_REVIEW_FAILED','UNCLASSIFIED']);
  const out={failureCode:codes.has(value.failureCode)?value.failureCode:'UNCLASSIFIED'};
  if(out.failureCode==='AGENT_ANSWER_REVIEW_FAILED'&&Array.isArray(value.reviewIssues))out.reviewIssues=[...new Set(value.reviewIssues.filter(x=>['incorrect','incomplete','unsupported_claim','needs_input'].includes(x)))].slice(0,5);
- if(['generation','verification','delivery'].includes(value.failureStage))out.failureStage=value.failureStage;
+ if(['preparation','generation','verification','delivery'].includes(value.failureStage))out.failureStage=value.failureStage;
  return out;
 }
 export async function handleOperator(path,method,b,pool){

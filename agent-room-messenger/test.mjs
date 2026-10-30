@@ -1,3 +1,4 @@
+import './operator-diagnostics.test.mjs';
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {createHmac} from 'node:crypto';

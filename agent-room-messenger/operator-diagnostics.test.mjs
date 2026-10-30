@@ -8,6 +8,7 @@ test('pending exposes only bounded diagnostic codes, never raw failure content',
  assert.equal(JSON.stringify(out).includes('private content'),false);assert.equal(JSON.stringify(out).includes('secret'),false);
 });
 test('unknown and absent diagnostics fail closed without invented reasons',()=>{
+ assert.deepEqual(operatorFailure({failureCode:'AGENT_INPUT_INVALID',failureStage:'preparation'}),{failureCode:'AGENT_INPUT_INVALID',failureStage:'preparation'});
  assert.equal(operatorFailure(null),null);assert.equal(operatorFailure('private'),null);
  assert.deepEqual(operatorFailure({failureCode:'private raw error',failureStage:'private',reviewIssues:['private']}),{failureCode:'UNCLASSIFIED'});
 });
