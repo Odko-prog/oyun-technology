@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {validateReply,childEnvironment,processRequest as actualProcessRequest,startCloudWorker,executorConfig,generateReply,failureMetadata} from './cloud-worker.mjs';
+import {validateReply,childEnvironment,processRequest as actualProcessRequest,startCloudWorker,executorConfig,generateReply,failureMetadata,correctionBudget} from './cloud-worker.mjs';
 import {createHash} from 'node:crypto';
 async function processRequest(pool, ...args){
  const wrapped={query:async(sql,params)=>{
@@ -271,4 +271,16 @@ test('twice rejected answer stays review with sanitized reason and no provider s
  let generations=0,reviews=0,sends=0,failure;
  const r=await processRequest({query:async(sql,p)=>{if(sql.includes('execution_failure='))failure=JSON.parse(p[2]);return {rows:[]};}},async()=>{sends++;return {sent:true};},job,async()=>{generations++;return {reply:'wrong',status:'awaiting_customer'};},{reviewGenerate:async()=>{reviews++;return {reply:'{"accepted":false,"issues":["incorrect"]}'};}});
  assert.equal(r.review,true);assert.equal(generations,2);assert.equal(reviews,2);assert.equal(sends,0);assert.deepEqual(failure.reviewIssues,['incorrect']);
+});
+
+test('correction generation has capped lease budget and reserves independent review time',()=>{
+ assert.equal(correctionBudget(0,0),120000);
+ assert.equal(correctionBudget(0,400000),75000);
+ assert.equal(correctionBudget(0,480000),0);
+});
+
+test('correction cannot bypass independent review by creating an artifact',async()=>{
+ let n=0,sends=0,reviews=0;
+ const r=await processRequest({query:async()=>({rows:[]})},async()=>{sends++;},job,async(_,o)=>{n++;if(n===2)assert.ok(o.generationTimeoutMs<=120000);return {reply:'fixture',status:'completed',artifacts:n===2?[{name:'escape.txt'}]:[]};},{reviewGenerate:async()=>{reviews++;return {reply:'{"accepted":false,"issues":["incorrect"]}'};}});
+ assert.equal(n,2);assert.equal(reviews,1);assert.equal(sends,0);assert.equal(r.failureCode,'AGENT_ANSWER_REVIEW_FAILED');
 });
