@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {graphClient,startBataarWorker} from './bataar-worker.mjs';
+import {graphClient,startBataarWorker,CAMP_PHOTO_URL} from './bataar-worker.mjs';
+test('photo adapter only publishes exact owner-approved asset to camp Page',async()=>{const calls=[];const g=graphClient({MOTHERLAND_PAGE_ACCESS_TOKEN:'test'},async(u,o)=>{calls.push(JSON.parse(o.body));return {ok:true,json:async()=>({post_id:PAGE_ID+'_1'})};});await g(PAGE_ID+'/photos',{message:'Эзний бичлэгийн кадр',photoUrl:CAMP_PHOTO_URL});assert.deepEqual(calls[0],{caption:'Эзний бичлэгийн кадр',url:CAMP_PHOTO_URL});await assert.rejects(g(PAGE_ID+'/photos',{message:'x',photoUrl:'https://example.com/leopard.jpg'}));await assert.rejects(g('1309261702280978/photos',{message:'x',photoUrl:CAMP_PHOTO_URL}));assert.equal(calls.length,1);});
 import {PAGE_ID} from './bataar-schedule.mjs';
 test('adapter uses separate camp secret and never calls another Page feed',async()=>{
   const calls=[];const graph=graphClient({MOTHERLAND_PAGE_ACCESS_TOKEN:'camp-test',PAGE_ACCESS_TOKEN:'other-page-test'},async(url,options)=>{calls.push([url,options]);return {ok:true,json:async()=>({id:PAGE_ID+'_123'})};});
