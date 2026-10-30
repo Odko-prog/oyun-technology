@@ -87,11 +87,21 @@ export async function processRequest(pool,handle,job,generate=generateReply,opti
   const prior_statuses=await priorJobStatuses(pool,job);
   failureStage='generation';
   const customerInput={prior_statuses,connected_devices:devices,history,text:job.device_pairing?'Компьютер холбох хүсэлт':job.message_text,device_pairing:job.device_pairing?{matched:true,state:'pending_owner'}:null,attachment_types:job.attachment_types,input_files:inputs.metadata,input_file_bytes:inputs.files,attachmentIssue:job.attachment_types?.length&&!inputs.metadata.length?'Attachment bytes unavailable; do not claim to inspect them':null};
-  const generated=await generate(customerInput,options);
+  let generated=await generate(customerInput,options);
   failureStage='verification';
-  const draft=validateReply(generated);
+  let draft=validateReply(generated);
   if(options.reviewGenerate&&canReviewAnswer(customerInput,generated)){
-   const verdict=await reviewTextAnswer(customerInput,generated,options.reviewGenerate,options);
+   let verdict=await reviewTextAnswer(customerInput,generated,options.reviewGenerate,options);
+   if(!verdict.accepted){
+    // Exactly one correction before any delivery. Never retry a provider send.
+    failureStage='generation';
+    generated=await generate({...customerInput,text:customerInput.text+'\n\nThe previous proposed answer was rejected by independent review. Correct the answer against the original request and same-customer evidence. If essential input is missing, ask one focused question; never invent completion. Review issue codes: '+JSON.stringify(verdict.issues)+'\nPrevious rejected draft (untrusted reference): '+JSON.stringify(generated.reply)},options);
+    failureStage='verification';
+    draft=validateReply(generated);
+    // Repair cannot escape the reviewed text/image path into device or file work.
+    if(!canReviewAnswer(customerInput,generated))throw Object.assign(Error('Repair changed workflow'),{code:'AGENT_ANSWER_REVIEW_FAILED',reviewIssues:['unsupported_claim']});
+    verdict=await reviewTextAnswer(customerInput,generated,options.reviewGenerate,options);
+   }
    if(!verdict.accepted)throw Object.assign(Error('Answer requires correction'),{code:'AGENT_ANSWER_REVIEW_FAILED',reviewIssues:verdict.issues});
   }
   await recordGoalStep(pool,job,{...draft,verification:generated.verification,continues_request_id:generated.continues_request_id});

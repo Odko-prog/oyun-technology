@@ -248,7 +248,7 @@ test('image answer rejection retains original image for independent review and n
   checks++;assert.equal(input.input_files.length,1);const file=input.input_files[0];assert.equal(input.input_file_bytes['/input/'+file.name],bytes.toString('base64'));assert.ok(!input.text.includes('fbcdn.net'));
   return {reply:'{"accepted":false,"issues":["incorrect"]}'};
  }});
- assert.equal(checks,1);assert.equal(sends,0);assert.equal(r.failureCode,'AGENT_ANSWER_REVIEW_FAILED');assert.equal(r.generationFailed,false);
+ assert.equal(checks,2);assert.equal(sends,0);assert.equal(r.failureCode,'AGENT_ANSWER_REVIEW_FAILED');assert.equal(r.generationFailed,false);
 });
 
 test('review diagnostics persist only allowlisted codes under matching processing lease',async()=>{
@@ -259,4 +259,16 @@ test('review diagnostics persist only allowlisted codes under matching processin
  assert.deepEqual(JSON.parse(saved.args[2]),{failureStage:'verification',failureCode:'AGENT_ANSWER_REVIEW_FAILED',reviewIssues:['incorrect','incomplete']});
  assert.equal(sends,0);assert.equal(result.generationFailed,false);
  assert.deepEqual(failureMetadata({code:'AGENT_ANSWER_REVIEW_FAILED',reviewIssues:['PRIVATE https://secret.invalid','incorrect','incorrect']}),{failureCode:'AGENT_ANSWER_REVIEW_FAILED',reviewIssues:['incorrect']});
+});
+
+
+test('rejected answer gets one correction and independent recheck before single delivery',async()=>{
+ let generations=0,reviews=0,sends=0;
+ const r=await processRequest({query:async()=>({rows:[]})},async(route)=>{if(route==='/operator/result')sends++;return {sent:true};},job,async input=>{generations++;if(generations===2)assert.match(input.text,/previous proposed answer was rejected/);return {reply:generations===1?'13':'12',status:'awaiting_customer'};},{reviewGenerate:async()=>({reply:JSON.stringify(++reviews===1?{accepted:false,issues:['incorrect']}:{accepted:true,issues:[]})})});
+ assert.equal(r.sent,true);assert.equal(generations,2);assert.equal(reviews,2);assert.equal(sends,1);
+});
+test('twice rejected answer stays review with sanitized reason and no provider send',async()=>{
+ let generations=0,reviews=0,sends=0,failure;
+ const r=await processRequest({query:async(sql,p)=>{if(sql.includes('execution_failure='))failure=JSON.parse(p[2]);return {rows:[]};}},async()=>{sends++;return {sent:true};},job,async()=>{generations++;return {reply:'wrong',status:'awaiting_customer'};},{reviewGenerate:async()=>{reviews++;return {reply:'{"accepted":false,"issues":["incorrect"]}'};}});
+ assert.equal(r.review,true);assert.equal(generations,2);assert.equal(reviews,2);assert.equal(sends,0);assert.deepEqual(failure.reviewIssues,['incorrect']);
 });
