@@ -1,4 +1,4 @@
-import {reviewTextAnswer,canReviewAnswer} from './answer-review.mjs';
+import {reviewTextAnswer,canReviewAnswer,reviewCodes} from './answer-review.mjs';
 import {reviewTrace} from './review-trace.mjs';
 import {priorJobStatuses} from './job-status.mjs';
 import {activeCustomerDevices,enqueueDeviceTask,dispatchOneDeviceResult} from './device-tasks.mjs';
@@ -34,6 +34,7 @@ export function failureMetadata(error){
  const allowed=new Set(['AGENT_INPUT_INVALID','AGENT_OUTPUT_INVALID','AI_TIMEOUT','AI_PROCESS_START_FAILED','AI_PROCESS_EXIT','AI_ABORTED','AI_CONTEXT_LIMIT','AGENT_ANSWER_REVIEW_FAILED']);
  const failureCode=allowed.has(error?.code)?error.code:'UNCLASSIFIED';
  const metadata={failureCode};
+ if(failureCode==='AGENT_ANSWER_REVIEW_FAILED'&&Array.isArray(error.reviewIssues))metadata.reviewIssues=[...new Set(error.reviewIssues.filter(x=>reviewCodes.has(x)))].slice(0,5);
  if(failureCode==='AI_PROCESS_EXIT'){
   if(Number.isInteger(error.exitCode)&&error.exitCode>=0&&error.exitCode<=255)metadata.exitCode=error.exitCode;
   if(['SIGTERM','SIGKILL','SIGABRT','SIGSEGV','SIGINT'].includes(error.exitSignal))metadata.exitSignal=error.exitSignal;
@@ -91,7 +92,7 @@ export async function processRequest(pool,handle,job,generate=generateReply,opti
   const draft=validateReply(generated);
   if(options.reviewGenerate&&canReviewAnswer(customerInput,generated)){
    const verdict=await reviewTextAnswer(customerInput,generated,options.reviewGenerate,options);
-   if(!verdict.accepted)throw Object.assign(Error('Answer requires correction'),{code:'AGENT_ANSWER_REVIEW_FAILED'});
+   if(!verdict.accepted)throw Object.assign(Error('Answer requires correction'),{code:'AGENT_ANSWER_REVIEW_FAILED',reviewIssues:verdict.issues});
   }
   await recordGoalStep(pool,job,{...draft,verification:generated.verification,continues_request_id:generated.continues_request_id});
   if(generated.device_task){if(options.env?.DEVICE_BRIDGE_ENABLED!=='true'||draft.status!=='awaiting_customer'||!devices.some(d=>d.id===generated.device_task.session_id))throw Error('Unverified device task');await enqueueDeviceTask(pool,job,generated.device_task);}
@@ -108,7 +109,8 @@ export async function processRequest(pool,handle,job,generate=generateReply,opti
  }catch(error){
   if(failureStage==='generation'&&error?.code==='AGENT_OUTPUT_INVALID')failureStage='verification';
   if(failureStage==='generation'&&error?.code==='AGENT_INPUT_INVALID')failureStage='preparation';
-  await pool.query("UPDATE messenger_requests SET status='review',lease_until=NULL WHERE id=$1 AND lease=$2 AND status='processing'",[job.id,job.lease]);
+  const failure={failureStage,...failureMetadata(error)};
+  await pool.query("UPDATE messenger_requests SET status='review',lease_until=NULL,execution_failure=$3::jsonb WHERE id=$1 AND lease=$2 AND status='processing'",[job.id,job.lease,JSON.stringify(failure)]);
   // A failed input or output remains held for review without stopping unrelated jobs.
   // Actual model/auth/approval failures retain the existing worker circuit breaker.
   return {id:job.id,sent:false,review:true,failureStage,generationFailed:failureStage==='generation',...failureMetadata(error)};

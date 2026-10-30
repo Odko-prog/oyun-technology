@@ -1,6 +1,6 @@
 import {randomUUID} from 'node:crypto';
 import {ownerJobNotice} from './job-status.mjs';
-export async function operatorSchema(pool){await pool.query(`ALTER TABLE messenger_requests ADD COLUMN IF NOT EXISTS lease UUID; ALTER TABLE messenger_requests ADD COLUMN IF NOT EXISTS lease_until TIMESTAMPTZ; ALTER TABLE messenger_requests ADD COLUMN IF NOT EXISTS reply_text TEXT; ALTER TABLE messenger_requests ADD COLUMN IF NOT EXISTS provider_id TEXT; ALTER TABLE messenger_notifications ADD COLUMN IF NOT EXISTS provider_id TEXT; ALTER TABLE messenger_notifications ADD COLUMN IF NOT EXISTS lease UUID; ALTER TABLE messenger_notifications ADD COLUMN IF NOT EXISTS attempted_at TIMESTAMPTZ;`)}
+export async function operatorSchema(pool){await pool.query(`ALTER TABLE messenger_requests ADD COLUMN IF NOT EXISTS execution_failure JSONB; ALTER TABLE messenger_requests ADD COLUMN IF NOT EXISTS lease UUID; ALTER TABLE messenger_requests ADD COLUMN IF NOT EXISTS lease_until TIMESTAMPTZ; ALTER TABLE messenger_requests ADD COLUMN IF NOT EXISTS reply_text TEXT; ALTER TABLE messenger_requests ADD COLUMN IF NOT EXISTS provider_id TEXT; ALTER TABLE messenger_notifications ADD COLUMN IF NOT EXISTS provider_id TEXT; ALTER TABLE messenger_notifications ADD COLUMN IF NOT EXISTS lease UUID; ALTER TABLE messenger_notifications ADD COLUMN IF NOT EXISTS attempted_at TIMESTAMPTZ;`)}
 const uuid=x=>typeof x==='string'&&/^[0-9a-f-]{36}$/i.test(x);
 export async function sendPage(recipient,text){
  if(!process.env.PAGE_ACCESS_TOKEN)throw Error('Page sender not configured');

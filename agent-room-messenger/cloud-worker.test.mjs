@@ -66,7 +66,7 @@ test('typed model timeout stays held for review without a send or circuit-breake
 test('model failure marks only matching processing lease for review without sending',async()=>{
  const queries=[];const pool={async query(sql,args){queries.push({sql,args});return {rows:[]};}};
  const result=await processRequest(pool,()=>{throw Error('must not send');},job,async()=>{throw Error('model failed');});
- assert.equal(result.review,true);assert.equal(result.generationFailed,true);assert.equal(result.failureStage,'generation');const review=queries.find(q=>q.sql.startsWith('UPDATE messenger_requests'));assert.match(review.sql,/status='processing'/);assert.deepEqual(review.args,['job-1','lease-1']);
+ assert.equal(result.review,true);assert.equal(result.generationFailed,true);assert.equal(result.failureStage,'generation');const review=queries.find(q=>q.sql.startsWith('UPDATE messenger_requests'));assert.match(review.sql,/status='processing'/);assert.deepEqual(review.args.slice(0,2),['job-1','lease-1']);assert.equal(JSON.parse(review.args[2]).failureStage,'generation');
 });
 
 test('corrupt prior input does not stop the worker from delivering the next customer job',async()=>{
@@ -249,4 +249,14 @@ test('image answer rejection retains original image for independent review and n
   return {reply:'{"accepted":false,"issues":["incorrect"]}'};
  }});
  assert.equal(checks,1);assert.equal(sends,0);assert.equal(r.failureCode,'AGENT_ANSWER_REVIEW_FAILED');assert.equal(r.generationFailed,false);
+});
+
+test('review diagnostics persist only allowlisted codes under matching processing lease',async()=>{
+ const queries=[];let sends=0;
+ const result=await processRequest({query:async(sql,args)=>{queries.push({sql,args});return {rows:[]};}},async()=>{sends++;},job,async()=>({reply:'fixture',status:'completed'}),{reviewGenerate:async()=>({reply:'{"accepted":false,"issues":["incorrect","incomplete"]}'})});
+ const saved=queries.find(q=>q.sql.includes('execution_failure='));
+ assert.match(saved.sql,/lease=\$2 AND status='processing'/);
+ assert.deepEqual(JSON.parse(saved.args[2]),{failureStage:'verification',failureCode:'AGENT_ANSWER_REVIEW_FAILED',reviewIssues:['incorrect','incomplete']});
+ assert.equal(sends,0);assert.equal(result.generationFailed,false);
+ assert.deepEqual(failureMetadata({code:'AGENT_ANSWER_REVIEW_FAILED',reviewIssues:['PRIVATE https://secret.invalid','incorrect','incorrect']}),{failureCode:'AGENT_ANSWER_REVIEW_FAILED',reviewIssues:['incorrect']});
 });
