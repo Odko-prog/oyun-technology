@@ -45,7 +45,7 @@ export async function runSlot({pool,now=new Date(),startAt,generate,verifyIdenti
     await pool.query("UPDATE bataar_publication_slots SET status='published',provider_id=$2,updated_at=NOW() WHERE slot=$1",[slot,id]);
     return {status:'published',slot,id};
   }catch(error){
-    if(stage==='preparation'&&error?.code==='SLOT_RESERVED'){
+    if(stage==='preparation'&&['SLOT_RESERVED','SOURCE_UNAVAILABLE'].includes(error?.code)){
       await pool.query("UPDATE bataar_publication_slots SET status='skipped',updated_at=NOW() WHERE slot=$1",[slot]);
       return {status:'skipped',slot};
     }
