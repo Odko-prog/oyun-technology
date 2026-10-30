@@ -1,4 +1,4 @@
-import {reviewTextAnswer} from './answer-review.mjs';
+import {reviewTextAnswer,canReviewAnswer} from './answer-review.mjs';
 import {priorJobStatuses} from './job-status.mjs';
 import {activeCustomerDevices,enqueueDeviceTask,dispatchOneDeviceResult} from './device-tasks.mjs';
 import {sendPage} from './operator.mjs';
@@ -86,7 +86,7 @@ export async function processRequest(pool,handle,job,generate=generateReply,opti
   const generated=await generate(customerInput,options);
   failureStage='verification';
   const draft=validateReply(generated);
-  if(options.reviewGenerate&&!job.device_pairing&&!generated.device_task&&!job.attachment_types?.length&&!generated.artifacts?.length){
+  if(options.reviewGenerate&&canReviewAnswer(customerInput,generated)){
    const verdict=await reviewTextAnswer(customerInput,generated,options.reviewGenerate,options);
    if(!verdict.accepted)throw Object.assign(Error('Answer requires correction'),{code:'AGENT_ANSWER_REVIEW_FAILED'});
   }

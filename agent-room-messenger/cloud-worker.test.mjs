@@ -241,3 +241,12 @@ test('reviewer outage cannot send unchecked text or stop unrelated generation',a
  let sends=0;const result=await processRequest({query:async()=>({rows:[]})},async()=>{sends++;},job,async()=>({reply:'fixture',status:'completed'}),{reviewGenerate:async()=>{throw Error('fixture reviewer outage');}});
  assert.equal(result.review,true);assert.equal(result.failureStage,'verification');assert.equal(result.generationFailed,false);assert.equal(sends,0);
 });
+test('image answer rejection retains original image for independent review and never delivers',async()=>{
+ const bytes=Buffer.from('ffd8ffc0000b080002000301011100ffda0008010100003f0000ffd9','hex');
+ const attached={...job,attachment_types:['image'],attachment_refs:[{type:'image',url:'https://x.fbcdn.net/fixture'}]};let sends=0,checks=0;
+ const r=await processRequest({query:async()=>({rows:[]})},async()=>{sends++;},attached,async()=>({reply:'Ambiguous fixture answer',status:'completed'}),{download:async()=>({mime:'image/jpeg',bytes}),reviewGenerate:async input=>{
+  checks++;assert.equal(input.input_files.length,1);const file=input.input_files[0];assert.equal(input.input_file_bytes['/input/'+file.name],bytes.toString('base64'));assert.ok(!input.text.includes('fbcdn.net'));
+  return {reply:'{"accepted":false,"issues":["incorrect"]}'};
+ }});
+ assert.equal(checks,1);assert.equal(sends,0);assert.equal(r.failureCode,'AGENT_ANSWER_REVIEW_FAILED');assert.equal(r.generationFailed,false);
+});
